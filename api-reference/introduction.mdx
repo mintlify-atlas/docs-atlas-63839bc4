@@ -1,33 +1,33 @@
 ---
-title: 'Introduction'
-description: 'Example section for showcasing API endpoints'
+title: "API Reference"
+description: "Complete reference for all public classes and functions in the Patronus Python SDK."
 ---
 
-<Note>
-  If you're not looking to build API reference documentation, you can delete
-  this section by removing the api-reference folder.
-</Note>
+The Patronus Python SDK exposes the following public API surface. Use the sidebar to navigate to the relevant section.
 
-## Welcome
-
-There are two ways to build API documentation: [OpenAPI](https://mintlify.com/docs/api-playground/openapi/setup) and [MDX components](https://mintlify.com/docs/api-playground/mdx/configuration). For the starter kit, we are using the following OpenAPI specification.
-
-<Card
-  title="Plant Store Endpoints"
-  icon="leaf"
-  href="https://github.com/mintlify/starter/blob/main/api-reference/openapi.json"
->
-  View the OpenAPI specification file
-</Card>
-
-## Authentication
-
-All API endpoints are authenticated using Bearer tokens and picked up from the specification file.
-
-```json
-"security": [
-  {
-    "bearerAuth": []
-  }
-]
-```
+<CardGroup cols={2}>
+  <Card title="init()" icon="play" href="/api-reference/init">
+    Initialize the SDK with your project and API key
+  </Card>
+  <Card title="Config" icon="sliders" href="/api-reference/config">
+    Configuration options and the config() singleton
+  </Card>
+  <Card title="Evaluators" icon="circle-check" href="/api-reference/evals">
+    EvaluationResult, @evaluator(), RemoteEvaluator, and more
+  </Card>
+  <Card title="Experiments" icon="flask" href="/api-reference/experiments">
+    run_experiment(), Experiment, FuncEvaluatorAdapter
+  </Card>
+  <Card title="Datasets" icon="database" href="/api-reference/datasets">
+    Dataset, Row, RemoteDatasetLoader, read_csv, read_jsonl
+  </Card>
+  <Card title="Tracing" icon="eye" href="/api-reference/tracing">
+    @traced() decorator and start_span() context manager
+  </Card>
+  <Card title="Patronus clients" icon="server" href="/api-reference/pat-client">
+    Patronus and AsyncPatronus batch evaluation clients
+  </Card>
+  <Card title="Prompts" icon="file-lines" href="/api-reference/prompts">
+    load_prompt(), push_prompt(), Prompt, LoadedPrompt
+  </Card>
+</CardGroup>

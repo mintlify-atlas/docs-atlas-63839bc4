@@ -1,0 +1,300 @@
+---
+title: "Custom evaluators"
+description: "Write your own evaluation logic using the @evaluator() decorator or class-based evaluators."
+---
+
+Custom evaluators let you define exactly what "good" means for your application. You can write a simple Python function, return any of several result types, and the SDK handles tracing and result export automatically.
+
+## Function-based evaluators
+
+<Tabs>
+  <Tab title="Using @evaluator()">
+
+The `@evaluator()` decorator is the fastest way to create an evaluator. Apply it to any Python function and the SDK wraps it with tracing, logging, and result export.
+
+```python
+import patronus
+from patronus import evaluator
+
+patronus.init()
+
+@evaluator()
+def keyword_match(text: str, keywords: list[str]) -> float:
+    """Scores how many of the given keywords appear in the text."""
+    matches = sum(keyword.lower() in text.lower() for keyword in keywords)
+    return matches / len(keywords) if keywords else 0.0
+
+score = keyword_match("The capital of France is Paris", ["capital", "France", "Paris"])
+print(f"Score: {score}")  # Output: Score: 1.0
+```
+
+The decorator works with both synchronous and asynchronous functions. It does not modify the function's return value — the raw value you return is what the caller receives.
+
+  </Tab>
+  <Tab title="Return types">
+
+Your evaluator function can return any of the following types:
+
+```python
+from patronus import evaluator
+from patronus.evals import EvaluationResult
+
+# Boolean — produces pass_=True/False and score=1.0/0.0
+@evaluator()
+def contains_answer(text: str, answer: str) -> bool:
+    return answer.lower() in text.lower()
+
+
+# Float or int — produces a numeric score
+@evaluator()
+def word_overlap(text1: str, text2: str) -> float:
+    words1 = set(text1.lower().split())
+    words2 = set(text2.lower().split())
+    intersection = words1 & words2
+    union = words1 | words2
+    return len(intersection) / len(union) if union else 0.0
+
+
+# String — produces a text_output label
+@evaluator()
+def tone_classifier(text: str) -> str:
+    positive = ["good", "excellent", "great", "helpful"]
+    negative = ["bad", "poor", "unhelpful", "wrong"]
+    pos = sum(w in text.lower() for w in positive)
+    neg = sum(w in text.lower() for w in negative)
+    if pos > neg:
+        return "positive"
+    elif neg > pos:
+        return "negative"
+    return "neutral"
+
+
+# EvaluationResult — full control over all fields
+@evaluator()
+def comprehensive_check(response: str, reference: str) -> EvaluationResult:
+    has_keywords = all(w in response.lower() for w in ["important", "key", "concept"])
+    accuracy = 0.85
+    return EvaluationResult(
+        score=accuracy,
+        pass_=accuracy >= 0.7,
+        text_output="Satisfactory" if accuracy >= 0.7 else "Needs improvement",
+        explanation=f"Response {'contains' if has_keywords else 'is missing'} key terms.",
+        metadata={"has_required_keywords": has_keywords, "response_length": len(response)},
+    )
+
+
+# None — skip recording this evaluation entirely
+@evaluator()
+def conditional_check(text: str) -> EvaluationResult | None:
+    if not text.strip():
+        return None  # Nothing to evaluate
+    return EvaluationResult(pass_=True, score=1.0)
+```
+
+  </Tab>
+</Tabs>
+
+## Async evaluators
+
+The `@evaluator()` decorator supports async functions with no extra configuration:
+
+```python
+import asyncio
+import patronus
+from patronus import evaluator
+
+patronus.init()
+
+@evaluator()
+async def async_keyword_check(text: str, keyword: str) -> bool:
+    # Async logic works naturally — e.g. calling an async API
+    await asyncio.sleep(0)  # placeholder for real async work
+    return keyword.lower() in text.lower()
+
+async def main():
+    result = await async_keyword_check("The sky is blue", "sky")
+    print(f"Found: {result}")  # Output: Found: True
+
+asyncio.run(main())
+```
+
+## Class-based evaluators
+
+For more complex evaluators that need initialization, shared state, or a standard interface, inherit from one of the provided base classes.
+
+<Tabs>
+  <Tab title="Evaluator">
+
+`Evaluator` is the base class for synchronous evaluators with a flexible `evaluate()` signature. You can define any parameters you need.
+
+```python
+from patronus.evals import Evaluator, EvaluationResult
+
+class ContentSafetyEvaluator(Evaluator):
+    evaluator_id = "content-safety"
+
+    UNSAFE_TERMS = ["violence", "hate", "illegal"]
+
+    def evaluate(self, task_output: str) -> EvaluationResult:
+        found = [t for t in self.UNSAFE_TERMS if t in task_output.lower()]
+        return EvaluationResult(
+            pass_=len(found) == 0,
+            score=0.0 if found else 1.0,
+            explanation=f"Found unsafe terms: {found}" if found else "No unsafe terms detected.",
+        )
+
+safety_check = ContentSafetyEvaluator()
+result = safety_check.evaluate(task_output="This is a helpful and safe response.")
+print(f"Passed: {result.pass_}")  # Output: Passed: True
+```
+
+  </Tab>
+  <Tab title="StructuredEvaluator">
+
+`StructuredEvaluator` enforces a fixed parameter set that matches the Patronus evaluation schema. Use this when you want your evaluator to be compatible with experiments.
+
+```python
+from typing import Union
+from patronus.evals import StructuredEvaluator, EvaluationResult
+
+class AnswerCorrectnessEvaluator(StructuredEvaluator):
+    evaluator_id = "answer-correctness"
+
+    def evaluate(
+        self,
+        *,
+        task_input: str | None = None,
+        task_output: str | None = None,
+        gold_answer: str | None = None,
+        task_context: Union[list[str], str, None] = None,
+        system_prompt: str | None = None,
+        task_metadata: dict | None = None,
+        **kwargs,
+    ) -> EvaluationResult:
+        if gold_answer is None or task_output is None:
+            return EvaluationResult(pass_=False, explanation="Missing output or gold answer.")
+        passed = task_output.strip().lower() == gold_answer.strip().lower()
+        return EvaluationResult(
+            pass_=passed,
+            score=1.0 if passed else 0.0,
+            explanation=f"Expected '{gold_answer}', got '{task_output}'.",
+        )
+
+evaluator = AnswerCorrectnessEvaluator()
+result = evaluator.evaluate(
+    task_input="What is the capital of France?",
+    task_output="Paris",
+    gold_answer="Paris",
+)
+print(f"Passed: {result.pass_}")  # Output: Passed: True
+```
+
+  </Tab>
+  <Tab title="AsyncStructuredEvaluator">
+
+`AsyncStructuredEvaluator` is the async counterpart to `StructuredEvaluator`. Define `evaluate` as an `async def` method.
+
+```python
+import asyncio
+from typing import Union
+from patronus.evals import AsyncStructuredEvaluator, EvaluationResult
+
+class AsyncRelevanceEvaluator(AsyncStructuredEvaluator):
+    evaluator_id = "async-relevance"
+
+    async def evaluate(
+        self,
+        *,
+        task_input: str | None = None,
+        task_output: str | None = None,
+        gold_answer: str | None = None,
+        task_context: Union[list[str], str, None] = None,
+        system_prompt: str | None = None,
+        task_metadata: dict | None = None,
+        **kwargs,
+    ) -> EvaluationResult:
+        # Simulate an async call (e.g., to an embedding model)
+        await asyncio.sleep(0)
+        if task_input is None or task_output is None:
+            return EvaluationResult(pass_=False)
+        relevant = any(word in task_output.lower() for word in task_input.lower().split())
+        return EvaluationResult(
+            pass_=relevant,
+            score=1.0 if relevant else 0.0,
+            explanation="Output shares terms with input." if relevant else "Output appears off-topic.",
+        )
+
+async def main():
+    evaluator = AsyncRelevanceEvaluator()
+    result = await evaluator.evaluate(
+        task_input="What is photosynthesis?",
+        task_output="Photosynthesis is the process by which plants convert light into energy.",
+    )
+    print(f"Passed: {result.pass_}")  # Output: Passed: True
+
+asyncio.run(main())
+```
+
+  </Tab>
+</Tabs>
+
+## The `EvaluationResult` object in detail
+
+Return an `EvaluationResult` when you need to populate more than one field at a time.
+
+```python
+from patronus.evals import EvaluationResult
+
+return EvaluationResult(
+    score=0.92,
+    pass_=True,
+    text_output="High quality",
+    explanation="Response is accurate, concise, and well-structured.",
+    metadata={
+        "word_count": 38,
+        "has_citations": True,
+        "flesch_score": 72.4,
+    },
+    tags={
+        "model": "gpt-4o",
+        "environment": "production",
+    },
+)
+```
+
+<ParamField path="score" type="float | None">
+  Numeric evaluation score. Typically ranges from 0 to 1. The SDK does not enforce this range.
+</ParamField>
+
+<ParamField path="pass_" type="bool | None">
+  Whether the evaluation passed. Use `pass_=True` or `pass_=False`. The trailing underscore avoids a conflict with Python's built-in `pass` keyword.
+</ParamField>
+
+<ParamField path="text_output" type="str | None">
+  Short categorical label for the result, such as `"Hallucinated"` or `"On-topic"`.
+</ParamField>
+
+<ParamField path="explanation" type="str | None">
+  Human-readable explanation shown in the Patronus platform. Helps reviewers understand why a result was produced.
+</ParamField>
+
+<ParamField path="metadata" type="dict | None">
+  Arbitrary JSON-serializable dictionary. Use this to store intermediate scores, feature flags, or any diagnostic data you want to retrieve later.
+</ParamField>
+
+<ParamField path="tags" type="dict[str, str] | None">
+  Key-value string pairs. Tags appear as filterable dimensions in the Patronus platform (for example, `{"env": "staging", "version": "v2"}`).
+</ParamField>
+
+<Note>
+  The `evaluation_duration` and `explanation_duration` fields are set automatically by the `@evaluator()` decorator and base classes. You do not need to set them manually.
+</Note>
+
+## Choosing a base class
+
+| Approach | When to use |
+|---|---|
+| `@evaluator()` decorator | Simple functions with flexible parameter signatures |
+| `Evaluator` | Class needs state or shared resources; flexible parameters |
+| `StructuredEvaluator` | Must be compatible with experiments; uses Patronus field names |
+| `AsyncStructuredEvaluator` | Async version of `StructuredEvaluator` |

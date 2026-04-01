@@ -1,0 +1,189 @@
+---
+title: "Observability configuration"
+description: "Configure OTLP export endpoints and protocols for tracing and logging using init(), environment variables, or patronus.yaml."
+keywords: ["otel", "otlp", "grpc", "http/protobuf", "endpoint", "exporter", "configuration", "opentelemetry"]
+---
+
+The Patronus SDK exports traces and logs over OTLP. You can configure the endpoint and transport protocol through `patronus.init()`, environment variables, or a `patronus.yaml` file.
+
+## Supported protocols
+
+| Protocol | `otel_exporter_otlp_protocol` value | Default endpoint | Ports |
+|---|---|---|---|
+| gRPC | `grpc` | `https://otel.patronus.ai:4317` | 4317 |
+| HTTP/Protobuf | `http/protobuf` | `https://otel.patronus.ai:4318` | 4318, 443 |
+
+The default protocol is `grpc`. Switch to `http/protobuf` if your network blocks gRPC or if you need to route traffic through a standard HTTPS port.
+
+## Configuration methods
+
+<Tabs>
+  <Tab title="init()">
+    Pass `otel_endpoint` and `otel_exporter_otlp_protocol` directly to `patronus.init()`. These values take the highest priority and override all other sources.
+
+    ```python
+    import patronus
+
+    # gRPC (default protocol)
+    patronus.init(
+        otel_endpoint="https://otel.patronus.ai:4317",
+        otel_exporter_otlp_protocol="grpc"
+    )
+    ```
+
+    ```python
+    import patronus
+
+    # HTTP/Protobuf
+    patronus.init(
+        otel_endpoint="https://otel.patronus.ai:4318",
+        otel_exporter_otlp_protocol="http/protobuf"
+    )
+    ```
+
+    Use the `service` parameter to set the service name that appears in the Patronus Platform. It defaults to the hostname if not provided:
+
+    ```python
+    import patronus
+
+    patronus.init(
+        service="my-llm-service",
+        otel_endpoint="https://otel.patronus.ai:4317",
+        otel_exporter_otlp_protocol="grpc"
+    )
+    ```
+  </Tab>
+
+  <Tab title="Environment variables">
+    Set `PATRONUS_OTEL_ENDPOINT` and `PATRONUS_OTEL_EXPORTER_OTLP_PROTOCOL` before running your script. With these in place, `patronus.init()` requires no arguments for observability configuration:
+
+    ```bash
+    export PATRONUS_OTEL_ENDPOINT="https://otel.patronus.ai:4318"
+    export PATRONUS_OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf"
+    ```
+
+    ```python
+    import patronus
+
+    patronus.init()  # Picks up PATRONUS_OTEL_* variables automatically
+    ```
+
+    You can also use the standard OpenTelemetry environment variables. These apply when no Patronus-specific variable is set:
+
+    ```bash
+    # Applies to all signals (traces and logs)
+    export OTEL_EXPORTER_OTLP_PROTOCOL="grpc"
+
+    # Signal-specific overrides
+    export OTEL_EXPORTER_OTLP_TRACES_PROTOCOL="http/protobuf"
+    export OTEL_EXPORTER_OTLP_LOGS_PROTOCOL="grpc"
+    ```
+  </Tab>
+
+  <Tab title="patronus.yaml">
+    Add observability options to your `patronus.yaml` file. The SDK loads this file automatically when `patronus.init()` is called from the same working directory.
+
+    ```yaml
+    otel_endpoint: "https://otel.patronus.ai:4318"
+    otel_exporter_otlp_protocol: "http/protobuf"
+    service: "my-llm-service"
+    ```
+  </Tab>
+</Tabs>
+
+## Configuration priority
+
+When the same option is set in multiple places, the SDK resolves it in this order (highest to lowest):
+
+1. `patronus.init()` function parameters
+2. `PATRONUS_OTEL_ENDPOINT` / `PATRONUS_OTEL_EXPORTER_OTLP_PROTOCOL` environment variables
+3. `patronus.yaml` file
+4. `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` / `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL`
+5. `OTEL_EXPORTER_OTLP_PROTOCOL`
+6. Default: `grpc`
+
+## Connection security
+
+Security is controlled by the URL scheme, for both gRPC and HTTP:
+
+- `https://` — TLS-encrypted connection
+- `http://` — Unencrypted connection
+
+```python
+import patronus
+
+# Secure gRPC
+patronus.init(otel_endpoint="https://collector.example.com:4317")
+
+# Insecure gRPC (for local collectors)
+patronus.init(otel_endpoint="http://collector.example.com:4317")
+
+# Secure HTTP/Protobuf
+patronus.init(
+    otel_endpoint="https://collector.example.com:4318",
+    otel_exporter_otlp_protocol="http/protobuf"
+)
+
+# Insecure HTTP/Protobuf
+patronus.init(
+    otel_endpoint="http://collector.example.com:4318",
+    otel_exporter_otlp_protocol="http/protobuf"
+)
+```
+
+<Warning>
+  Use `http://` only for local development or private network collectors. Production traffic should always use `https://`.
+</Warning>
+
+## HTTP path handling
+
+When using `http/protobuf`, the SDK automatically appends the correct signal path to your endpoint:
+
+- Traces: `<endpoint>/v1/traces`
+- Logs: `<endpoint>/v1/logs`
+
+You do not need to include these paths in `otel_endpoint`.
+
+## Examples
+
+### Custom internal collector
+
+```python
+import patronus
+
+patronus.init(
+    otel_endpoint="http://internal-collector:8080",
+    otel_exporter_otlp_protocol="http/protobuf"
+)
+```
+
+### Standard HTTPS port (443)
+
+```python
+import patronus
+
+patronus.init(
+    otel_endpoint="https://otel.example.com:443",
+    otel_exporter_otlp_protocol="http/protobuf"
+)
+```
+
+### Insecure gRPC for local development
+
+```python
+import patronus
+
+patronus.init(
+    otel_endpoint="http://localhost:4317",
+    otel_exporter_otlp_protocol="grpc"
+)
+```
+
+### Mixed protocols per signal
+
+Use standard OpenTelemetry environment variables to send traces and logs over different protocols:
+
+```bash
+export OTEL_EXPORTER_OTLP_TRACES_PROTOCOL="http/protobuf"
+export OTEL_EXPORTER_OTLP_LOGS_PROTOCOL="grpc"
+```

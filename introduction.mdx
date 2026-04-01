@@ -1,0 +1,73 @@
+---
+title: "Patronus Python SDK"
+description: "Evaluate, trace, and experiment with Large Language Model applications using a unified Python SDK."
+---
+
+The Patronus Python SDK gives you everything you need to build reliable LLM applications — from tracing individual function calls, to running structured experiments across large datasets, to evaluating outputs with both built-in and custom evaluators.
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/getting-started/installation">
+    Install the SDK and set up your API key in minutes
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/getting-started/quickstart">
+    Run your first evaluation and experiment with a few lines of code
+  </Card>
+  <Card title="Evaluations" icon="circle-check" href="/evaluations/overview">
+    Define custom evaluators or use Patronus-managed evaluators
+  </Card>
+  <Card title="Experiments" icon="flask" href="/experiments/introduction">
+    Systematically test your LLM pipeline across datasets
+  </Card>
+  <Card title="Observability" icon="eye" href="/observability/tracing">
+    Trace functions and spans with OpenTelemetry-based instrumentation
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/init">
+    Full reference for every public class and function
+  </Card>
+</CardGroup>
+
+## What you can do
+
+- **Evaluate** LLM outputs using the `@evaluator()` decorator or managed `RemoteEvaluator` — supports boolean, float, string, and structured `EvaluationResult` return types
+- **Experiment** systematically by running tasks over datasets and collecting evaluation results with `run_experiment()`
+- **Trace** any Python function or code block using `@traced()` and `start_span()`, built on OpenTelemetry
+- **Manage prompts** with versioning, labels, and multiple template engines (f-string, Mustache, Jinja2)
+- **Integrate** with OpenAI, Anthropic, and other providers through OpenInference instrumentors
+
+## Get started
+
+<Steps>
+  <Step title="Install the SDK">
+    ```bash
+    pip install patronus
+    ```
+  </Step>
+  <Step title="Set your API key">
+    ```bash
+    export PATRONUS_API_KEY="your-api-key"
+    ```
+    Or create a `patronus.yaml` config file in your project directory.
+  </Step>
+  <Step title="Initialize and evaluate">
+    ```python
+    import patronus
+    from patronus.evals import RemoteEvaluator
+
+    patronus.init()
+
+    evaluator = RemoteEvaluator("judge", "patronus:is-concise")
+    result = evaluator.evaluate(
+        task_input="Summarize the report",
+        task_output="The report shows a 12% revenue increase in Q3."
+    )
+    print(f"Passed: {result.pass_}, Score: {result.score}")
+    ```
+  </Step>
+  <Step title="Explore the docs">
+    Continue to the [Quickstart](/getting-started/quickstart) for more examples covering tracing, experiments, and custom evaluators.
+  </Step>
+</Steps>
+
+<Note>
+  This documentation covers the Patronus Python SDK only. For platform documentation, evaluator criteria, and dashboard guides, visit [docs.patronus.ai](https://docs.patronus.ai).
+</Note>

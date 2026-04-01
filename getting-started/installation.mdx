@@ -1,0 +1,80 @@
+---
+title: "Installation"
+description: "Install the Patronus Python SDK and configure your API key."
+keywords: ["install", "pip", "uv", "setup", "api key", "patronus"]
+---
+
+The Patronus SDK requires **Python 3.9 or higher**.
+
+<Steps>
+  <Step title="Install the package">
+    <CodeGroup>
+
+    ```bash pip
+    pip install patronus
+    ```
+
+    ```bash uv
+    uv add patronus
+    ```
+
+    </CodeGroup>
+
+    <Note>
+      To use the experiments framework (which requires pandas), install the `experiments` extra:
+
+      <CodeGroup>
+
+      ```bash pip
+      pip install 'patronus[experiments]'
+      ```
+
+      ```bash uv
+      uv add 'patronus[experiments]'
+      ```
+
+      </CodeGroup>
+    </Note>
+  </Step>
+
+  <Step title="Get your API key">
+    Sign in at [app.patronus.ai](https://app.patronus.ai), navigate to **API Keys**, and create a new key.
+  </Step>
+
+  <Step title="Configure your API key">
+    You can provide your API key in two ways.
+
+    **Environment variable** — set `PATRONUS_API_KEY` before running your script:
+
+    ```bash
+    export PATRONUS_API_KEY="your-api-key"
+    ```
+
+    **Configuration file** — create a `patronus.yaml` file in your project directory:
+
+    ```yaml
+    api_key: "your-api-key"
+    project_name: "My Project"
+    ```
+
+    When `patronus.yaml` is present, `patronus.init()` loads it automatically. See [Configuration](/configuration) for all available options.
+  </Step>
+
+  <Step title="Verify the installation">
+    Run a quick check to confirm everything is working:
+
+    ```python
+    import patronus
+
+    patronus.init()
+
+    @patronus.traced()
+    def test_function():
+        return "Installation successful!"
+
+    print(test_function())
+    ```
+
+    If no errors appear, the SDK is installed and configured correctly.
+  </Step>
+</Steps>

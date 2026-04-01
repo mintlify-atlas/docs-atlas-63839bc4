@@ -1,0 +1,149 @@
+---
+title: "Logging"
+description: "Record structured events and debug information from your LLM application using get_logger(), with automatic export to the Patronus AI Platform."
+keywords: ["logging", "get_logger", "structured logs", "log levels", "patronus", "opentelemetry"]
+---
+
+The Patronus SDK provides a logging interface that integrates with Python's standard `logging` module while automatically exporting records to the Patronus AI Platform over OTLP.
+
+<Tip>
+  For OTLP endpoint and protocol configuration, see [Observability configuration](/observability/configuration).
+</Tip>
+
+## Getting a logger
+
+Call `patronus.get_logger()` after `patronus.init()` to obtain a logger that exports to the platform:
+
+```python
+import patronus
+
+patronus.init()
+log = patronus.get_logger()
+
+log.info("Processing user query")
+log.debug("Detailed debug information")
+log.warning("Something might be wrong")
+log.error("An error occurred")
+log.critical("System cannot continue")
+```
+
+## Logging within traced spans
+
+`get_logger()` integrates with the tracing system. Log calls made inside a `@traced()` function or a `start_span()` block are automatically correlated with the active span:
+
+```python
+import patronus
+from patronus import traced, start_span
+
+patronus.init()
+log = patronus.get_logger()
+
+@traced()
+def process_user_query(query):
+    log.info("Processing query")
+
+    with start_span("Query Analysis"):
+        log.info("Analyzing query intent")
+        ...
+
+    with start_span("Response Generation"):
+        log.info("Generating LLM response")
+        ...
+
+    return "Response to: " + query
+
+result = process_user_query("Tell me about machine learning")
+```
+
+Each log record carries the trace and span IDs of the active span at the time it was emitted, making it easy to correlate logs with traces in the Patronus Platform.
+
+## Enabling console output
+
+By default, log records are exported to the Patronus AI Platform but are not printed to your terminal. Add a standard `StreamHandler` to also write logs to `stdout`:
+
+```python
+import sys
+import logging
+import patronus
+
+patronus.init()
+log = patronus.get_logger()
+
+console_handler = logging.StreamHandler(sys.stdout)
+log.addHandler(console_handler)
+
+# Logs now appear in the terminal and are exported to Patronus
+log.info("This message appears in the console and is sent to Patronus")
+```
+
+To include timestamps and log levels in the console output, attach a formatter:
+
+```python
+import sys
+import logging
+import patronus
+
+patronus.init()
+log = patronus.get_logger()
+
+formatter = logging.Formatter('[%(asctime)s] %(levelname)-8s: %(message)s')
+
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(formatter)
+log.addHandler(console_handler)
+
+log.info("Formatted log message")
+```
+
+## Log levels
+
+The logger follows standard Python log levels:
+
+| Method | Level | When to use |
+|---|---|---|
+| `log.debug(...)` | `DEBUG` | Granular diagnostic information |
+| `log.info(...)` | `INFO` | Normal operational events |
+| `log.warning(...)` | `WARNING` | Something unexpected, but execution continues |
+| `log.error(...)` | `ERROR` | A failure in a specific operation |
+| `log.critical(...)` | `CRITICAL` | A severe error that may prevent continued operation |
+
+## Advanced logger configuration
+
+The SDK uses two named loggers you can configure independently:
+
+- `patronus.sdk` — records emitted by your application code, exported to the Patronus AI Platform
+- `patronus.core` — records emitted by SDK internals, not exported to the platform
+
+Configure them through the standard `logging` module:
+
+```python
+import logging
+import patronus
+
+patronus.init()
+
+# Set the base level for all Patronus loggers
+patronus_root_logger = logging.getLogger("patronus")
+patronus_root_logger.setLevel(logging.WARNING)
+
+# Add a console handler with custom formatting
+console_handler = logging.StreamHandler()
+formatter = logging.Formatter(
+    fmt='[%(asctime)s] %(levelname)-8s %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+console_handler.setFormatter(formatter)
+patronus_root_logger.addHandler(console_handler)
+
+# Only show warnings and above for internal SDK messages
+patronus_core_logger = logging.getLogger("patronus.core")
+patronus_core_logger.setLevel(logging.WARNING)
+
+# Show info and above for your application logs
+patronus_sdk_logger = logging.getLogger("patronus.sdk")
+patronus_sdk_logger.setLevel(logging.INFO)
+```
+
+<Note>
+  Call `patronus.init()` before configuring the `patronus.sdk` logger. Initialization registers the OTLP log exporter, which the logger relies on to send records to the platform.
+</Note>

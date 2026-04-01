@@ -1,0 +1,127 @@
+---
+title: "Tracing"
+description: "Decorator and context manager for adding OpenTelemetry spans to your application code."
+---
+
+Both `traced()` and `start_span()` are no-ops when the SDK has not been initialized with `patronus.init()`.
+
+## `@traced()`
+
+Decorator that records a span for the wrapped function. Works with both `def` and `async def`.
+
+```python
+from patronus import traced
+```
+
+### Signature
+
+```python
+@traced(
+    span_name=None,
+    *,
+    log_args=True,
+    log_results=True,
+    log_exceptions=True,
+    disable_log=False,
+    attributes=None,
+)
+```
+
+<ParamField path="span_name" type="str | None" default="None">
+  Name of the traced span. Defaults to the function's qualified name (`func.__qualname__`).
+</ParamField>
+
+<ParamField path="log_args" type="bool" default="True">
+  Whether to log the arguments passed to the function.
+</ParamField>
+
+<ParamField path="log_results" type="bool" default="True">
+  Whether to log the function's return value.
+</ParamField>
+
+<ParamField path="log_exceptions" type="bool" default="True">
+  Whether to log any exception raised by the function.
+</ParamField>
+
+<ParamField path="disable_log" type="bool" default="False">
+  Disable all log output for this span. When `True`, overrides `log_args`, `log_results`, and `log_exceptions`.
+</ParamField>
+
+<ParamField path="attributes" type="dict | None" default="None">
+  OpenTelemetry span attributes to attach to the span.
+</ParamField>
+
+### Example
+
+```python
+import patronus
+
+patronus.init()
+
+@patronus.traced()
+def process_input(user_query: str) -> str:
+    # Function body is traced automatically
+    return f"Processed: {user_query}"
+
+@patronus.traced("custom-span-name", log_results=False)
+async def call_llm(prompt: str) -> str:
+    return await my_llm_client(prompt)
+```
+
+---
+
+## `start_span()`
+
+Context manager for creating a span around a block of code.
+
+```python
+from patronus import start_span
+```
+
+### Signature
+
+```python
+@contextlib.contextmanager
+def start_span(
+    name: str,
+    *,
+    record_exception: bool = True,
+    attributes: dict | None = None,
+) -> Iterator[Span | None]: ...
+```
+
+<ParamField path="name" type="str" required>
+  Name of the span.
+</ParamField>
+
+<ParamField path="record_exception" type="bool" default="True">
+  Whether to record exceptions that occur within the span.
+</ParamField>
+
+<ParamField path="attributes" type="dict | None" default="None">
+  OpenTelemetry span attributes to attach to the span.
+</ParamField>
+
+Yields the span object, or `None` if the SDK is not initialized. The span is ended automatically when the context manager exits.
+
+### Example
+
+```python
+import patronus
+
+patronus.init()
+
+def complex_operation():
+    with patronus.start_span("data-preparation"):
+        data = load_data()
+        data = preprocess(data)
+
+    with patronus.start_span("model-inference", attributes={"model": "gpt-4"}):
+        output = run_model(data)
+
+    return output
+```
+
+<Tip>
+  Use `start_span()` for finer-grained control when `@traced()` is not suitable, such as inside loops or conditional branches.
+</Tip>

@@ -1,0 +1,85 @@
+---
+title: "Agent integrations"
+description: "Instrument Pydantic AI agents for observability using the Patronus SDK."
+keywords: ["agents", "pydantic-ai", "pydantic ai", "agent observability", "tracing", "instrumentation", "opentelemetry"]
+---
+
+The Patronus SDK integrates with agent frameworks to capture traces and logs from all agent operations. Pass an integrator to `patronus.init()` and every agent in your application is instrumented automatically.
+
+---
+
+## Pydantic AI
+
+[Pydantic AI](https://ai.pydantic.dev/) is a framework for building type-safe AI agents with structured outputs and tool use. The `PydanticAIIntegrator` instruments all agents globally so you don't need to configure each one individually.
+
+### Installation
+
+<CodeGroup>
+  ```bash pip
+  pip install patronus pydantic-ai
+  ```
+  ```bash uv
+  uv add patronus pydantic-ai
+  ```
+</CodeGroup>
+
+### Basic usage
+
+```python
+from patronus import init
+from patronus.integrations.pydantic_ai import PydanticAIIntegrator
+
+patronus_ctx = init(
+    integrations=[PydanticAIIntegrator()]
+)
+
+# All Pydantic AI agents now send telemetry to Patronus
+```
+
+After this call, every `Agent` instance in your application is instrumented via `Agent.instrument_all()`.
+
+### Configuration
+
+`PydanticAIIntegrator` accepts one parameter:
+
+<ParamField path="event_mode" type='"logs" | "attributes"' default='"logs"'>
+  Controls how agent events are captured in traces.
+
+  - `"logs"` — captures events as log records attached to spans. This is the recommended mode for the Patronus Platform.
+  - `"attributes"` — captures events as span attributes instead.
+</ParamField>
+
+```python
+from patronus import init
+from patronus.integrations.pydantic_ai import PydanticAIIntegrator
+
+patronus_ctx = init(
+    integrations=[PydanticAIIntegrator(event_mode="logs")]
+)
+```
+
+<Tip>
+  Use the default `event_mode="logs"` unless you have a specific reason to prefer span attributes. The Patronus Platform is optimized to display log-based events from Pydantic AI agents.
+</Tip>
+
+### How it works
+
+`PydanticAIIntegrator.apply()` calls `Agent.instrument_all()` with an `InstrumentationSettings` object that points to the tracer provider and event logger provider from the Patronus context:
+
+```python
+# Simplified view of what PydanticAIIntegrator does internally
+from pydantic_ai.agent import Agent, InstrumentationSettings
+
+settings = InstrumentationSettings(
+    event_mode="logs",
+    tracer_provider=ctx.tracer_provider,
+    event_logger_provider=EventLoggerProvider(ctx.logger_provider),
+)
+Agent.instrument_all(instrument=settings)
+```
+
+This ensures all agent spans are exported to the Patronus OTLP endpoint.
+
+<Note>
+  `PydanticAIIntegrator` instruments all agents globally, including those created before `patronus.init()` is called. If you need per-agent instrumentation, use Pydantic AI's `InstrumentationSettings` directly and pass the tracer provider from `patronus_ctx.tracer_provider`.
+</Note>

@@ -1,0 +1,361 @@
+---
+title: "Evaluators"
+description: "Function decorators, base classes, remote evaluators, and result types for building evaluations."
+---
+
+## `EvaluationResult`
+
+Container for evaluation outcomes. Return this from evaluator functions for full control over the result.
+
+```python
+from patronus.evals import EvaluationResult
+```
+
+### Fields
+
+<ResponseField name="score" type="float | None" default="None">
+  Numerical score for the evaluation, typically in the range 0–1 where 1 is best.
+</ResponseField>
+
+<ResponseField name="pass_" type="bool | None" default="None">
+  Whether the evaluation passed.
+</ResponseField>
+
+<ResponseField name="text_output" type="str | None" default="None">
+  Human-readable categorical label or text output for the evaluation.
+</ResponseField>
+
+<ResponseField name="explanation" type="str | None" default="None">
+  Human-readable explanation of the result.
+</ResponseField>
+
+<ResponseField name="metadata" type="dict | None" default="None">
+  Arbitrary JSON-serializable metadata about the evaluation.
+</ResponseField>
+
+<ResponseField name="tags" type="dict[str, str] | None" default="None">
+  Key-value tag metadata attached to the result.
+</ResponseField>
+
+<ResponseField name="evaluation_duration" type="timedelta | None" default="None">
+  Duration of the evaluation. Set automatically by the `@evaluator` decorator if not provided.
+</ResponseField>
+
+<ResponseField name="explanation_duration" type="timedelta | None" default="None">
+  Duration of explanation generation, when applicable.
+</ResponseField>
+
+### Automatic type coercion
+
+If your evaluator returns a simpler type, it is automatically converted:
+
+| Return type | Conversion |
+|---|---|
+| `bool` | `EvaluationResult(pass_=value, score=float(value))` |
+| `int` / `float` | `EvaluationResult(score=float(value))` |
+| `str` | `EvaluationResult(text_output=value)` |
+| `None` | Evaluation is skipped — nothing is recorded |
+
+---
+
+## `@evaluator()`
+
+Decorator that turns a function into a tracked evaluator. Works with both `def` and `async def`.
+
+```python
+from patronus import evaluator
+```
+
+### Signature
+
+```python
+@evaluator(
+    evaluator_id=None,
+    criteria=None,
+    metric_name=None,
+    metric_description=None,
+    is_method=False,
+    span_name=None,
+    log_none_arguments=False,
+)
+```
+
+<ParamField path="evaluator_id" type="str | Callable[[], str] | None" default="None">
+  Name for the evaluator. Defaults to the function name. Accepts a callable for dynamic resolution.
+</ParamField>
+
+<ParamField path="criteria" type="str | Callable[[], str] | None" default="None">
+  Criteria name. Recommended only when the evaluation algorithm varies by criteria (strategy pattern).
+</ParamField>
+
+<ParamField path="metric_name" type="str | None" default="None">
+  Name for the evaluation metric. Defaults to `evaluator_id`.
+</ParamField>
+
+<ParamField path="metric_description" type="str | None" default="None">
+  Description of the metric. Defaults to the function's docstring.
+</ParamField>
+
+<ParamField path="is_method" type="bool" default="False">
+  Set to `True` when decorating a class method. Removes `self` from the log. Inherited evaluator classes set this automatically.
+</ParamField>
+
+<ParamField path="span_name" type="str | None" default="None">
+  Name for the tracing span. Defaults to a generated name based on the evaluator.
+</ParamField>
+
+<ParamField path="log_none_arguments" type="bool" default="False">
+  Whether to include `None`-valued arguments in log output. Only affects top-level arguments.
+</ParamField>
+
+The decorator does not change the function's return value. Results are exported in the background.
+
+### Example
+
+```python
+from patronus import init, evaluator
+from patronus.evals import EvaluationResult
+
+init()
+
+@evaluator()
+def exact_match(actual: str, expected: str) -> bool:
+    return actual.strip() == expected.strip()
+
+@evaluator()
+def scored_match(actual: str, expected: str) -> EvaluationResult:
+    matched = actual.strip() == expected.strip()
+    return EvaluationResult(
+        pass_=matched,
+        score=1.0 if matched else 0.0,
+        explanation="Exact match" if matched else "No match",
+    )
+
+result = exact_match("hello", "hello")  # True
+```
+
+---
+
+## `Evaluator`
+
+Abstract base class for synchronous class-based evaluators.
+
+```python
+from patronus.evals import Evaluator
+```
+
+Subclass `Evaluator` and implement `evaluate()`. The `@evaluator` decorator is applied automatically to the `evaluate` method at class creation time.
+
+### Class attributes
+
+<ResponseField name="evaluator_id" type="str | None" default="None">
+  Override the evaluator ID. Defaults to the class name.
+</ResponseField>
+
+<ResponseField name="criteria" type="str | None" default="None">
+  Optional criteria name.
+</ResponseField>
+
+<ResponseField name="weight" type="str | float | None" default="None">
+  Optional weight for use in experiments.
+</ResponseField>
+
+### Constructor
+
+```python
+Evaluator(weight=None)
+```
+
+<ParamField path="weight" type="str | float | None" default="None">
+  Relative importance weight within an experiment. Must be a valid decimal number.
+</ParamField>
+
+### Abstract method
+
+```python
+def evaluate(self, *args, **kwargs) -> EvaluationResult | None: ...
+```
+
+You may customize the parameter signature of `evaluate()` freely.
+
+---
+
+## `StructuredEvaluator`
+
+Subclass of `Evaluator` with a fixed, standard parameter signature for `evaluate()`. Use this when your evaluator needs to work inside experiments.
+
+```python
+from patronus.evals import StructuredEvaluator
+```
+
+### `evaluate()` signature
+
+```python
+def evaluate(
+    self,
+    *,
+    system_prompt: str | None = None,
+    task_context: list[str] | str | None = None,
+    task_attachments: list | None = None,
+    task_input: str | None = None,
+    task_output: str | None = None,
+    gold_answer: str | None = None,
+    task_metadata: dict | None = None,
+    **kwargs,
+) -> EvaluationResult: ...
+```
+
+### Example
+
+```python
+from patronus.evals import StructuredEvaluator, EvaluationResult
+
+class ExactMatch(StructuredEvaluator):
+    def evaluate(self, *, task_output=None, gold_answer=None, **kwargs):
+        matched = task_output == gold_answer
+        return EvaluationResult(pass_=matched, score=float(matched))
+```
+
+---
+
+## `AsyncStructuredEvaluator`
+
+Async version of `StructuredEvaluator`. Implement `evaluate()` as a coroutine.
+
+```python
+from patronus.evals import AsyncStructuredEvaluator
+```
+
+```python
+class MyAsyncEvaluator(AsyncStructuredEvaluator):
+    async def evaluate(self, *, task_output=None, gold_answer=None, **kwargs):
+        result = await some_async_check(task_output, gold_answer)
+        return EvaluationResult(pass_=result)
+```
+
+---
+
+## `RemoteEvaluator`
+
+Calls a hosted Patronus evaluator over the API. Synchronous.
+
+```python
+from patronus.evals import RemoteEvaluator
+```
+
+### Constructor
+
+```python
+RemoteEvaluator(
+    evaluator_id_or_alias,
+    criteria=None,
+    *,
+    tags=None,
+    explain_strategy="always",
+    allow_update=False,
+    max_attempts=3,
+    api_=None,
+    weight=None,
+    retry_max_attempts=3,
+    retry_initial_delay=1,
+    retry_backoff_factor=2,
+)
+```
+
+<ParamField path="evaluator_id_or_alias" type="str" required>
+  ID or alias of the hosted evaluator (e.g. `"lynx"`).
+</ParamField>
+
+<ParamField path="criteria" type="str | None" default="None">
+  Criteria name. If not provided, the evaluator's default criteria is used.
+</ParamField>
+
+<ParamField path="tags" type="dict[str, str] | None" default="None">
+  Tags to attach to all evaluations produced by this evaluator.
+</ParamField>
+
+<ParamField path="explain_strategy" type='"never" | "on-fail" | "on-success" | "always"' default='"always"'>
+  When to generate explanations for evaluation results.
+</ParamField>
+
+<ParamField path="weight" type="str | float | None" default="None">
+  Relative weight within an experiment. Must be a valid decimal number.
+</ParamField>
+
+<ParamField path="retry_max_attempts" type="int" default="3">
+  Maximum number of retry attempts on API failure.
+</ParamField>
+
+<ParamField path="retry_initial_delay" type="int" default="1">
+  Initial delay in seconds before the first retry.
+</ParamField>
+
+<ParamField path="retry_backoff_factor" type="int" default="2">
+  Multiplier applied to the delay between successive retries.
+</ParamField>
+
+### Example
+
+```python
+from patronus.evals import RemoteEvaluator
+
+evaluator = RemoteEvaluator("lynx", "patronus:hallucination")
+
+result = evaluator.evaluate(
+    task_input="What is the capital of France?",
+    task_output="The capital of France is Paris.",
+    gold_answer="Paris",
+)
+print(result.pass_, result.score)
+```
+
+---
+
+## `AsyncRemoteEvaluator`
+
+Async version of `RemoteEvaluator`. Same constructor parameters. Call `await evaluator.evaluate(...)`.
+
+```python
+from patronus.evals import AsyncRemoteEvaluator
+```
+
+---
+
+## `bundled_eval()`
+
+Context manager that groups multiple evaluations sharing the same input into a single log bundle.
+
+```python
+from patronus.evals import bundled_eval
+```
+
+### Signature
+
+```python
+@contextlib.contextmanager
+def bundled_eval(
+    span_name: str = "Evaluation bundle",
+    attributes: dict[str, str] | None = None,
+) -> Iterator[None]: ...
+```
+
+<ParamField path="span_name" type="str" default='"Evaluation bundle"'>
+  Name of the tracing span wrapping the bundle.
+</ParamField>
+
+<ParamField path="attributes" type="dict[str, str] | None" default="None">
+  Additional span attributes.
+</ParamField>
+
+### Example
+
+```python
+from patronus.evals import bundled_eval
+
+with bundled_eval():
+    # Both evaluators share the same log entry for (x=10, y=20)
+    foo_evaluator(x=10, y=20)
+    bar_evaluator(x=10, y=20)
+    # This creates a separate bundle entry
+    tar_evaluator(spam="abc123")
+```

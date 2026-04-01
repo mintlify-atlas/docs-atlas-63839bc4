@@ -1,0 +1,260 @@
+---
+title: "Datasets"
+description: "Load and structure experiment datasets from inline records, files, DataFrames, or the Patronus platform."
+---
+
+A dataset is the starting point for every experiment. It contains the examples that your task function processes and your evaluators score. This page covers the `Row` object, the standard field schema, and the different ways to load a dataset.
+
+## The `Row` object
+
+During an experiment each dataset example is provided to your task and evaluators as a `Row` instance. `Row` wraps a pandas `Series` and exposes all columns as attributes.
+
+### Standard fields
+
+Using the standard field names makes your dataset compatible with `StructuredEvaluator` classes without any extra configuration.
+
+<ResponseField name="task_input" type="str | None">
+  The primary input query or text — typically the user message sent to an LLM.
+</ResponseField>
+
+<ResponseField name="task_output" type="str | None">
+  The model's response or the output to evaluate. Populated by the task function, or provided directly in the dataset if you're evaluating pre-existing outputs.
+</ResponseField>
+
+<ResponseField name="gold_answer" type="str | None">
+  The expected correct answer or reference output used by evaluators.
+</ResponseField>
+
+<ResponseField name="system_prompt" type="str | None">
+  The system instruction passed to an LLM-based task.
+</ResponseField>
+
+<ResponseField name="task_context" type="str | list[str] | None">
+  Additional information or retrieval context. The SDK normalizes a bare string to a single-element list.
+</ResponseField>
+
+<ResponseField name="task_metadata" type="dict | None">
+  Arbitrary structured information about the task.
+</ResponseField>
+
+<ResponseField name="task_attachments" type="list[dict] | None">
+  Files or binary data for multimodal evaluation. Each entry requires `url` and `media_type` string fields.
+</ResponseField>
+
+<ResponseField name="tags" type="dict[str, str] | None">
+  Key-value pairs used to categorize and filter examples.
+</ResponseField>
+
+<ResponseField name="sid" type="str">
+  A unique identifier for the example. Auto-generated as a sequential integer string if omitted.
+</ResponseField>
+
+You can also add any custom columns to your dataset. Access them the same way as standard fields:
+
+```python
+def my_task(row, **kwargs):
+    difficulty = row.difficulty   # custom field
+    category = row.tags.get("category") if row.tags else None
+    sample_id = row.sid
+    return f"[{difficulty}] {row.task_input}"
+```
+
+## Loading datasets
+
+<Tabs>
+  <Tab title="List of dicts">
+
+Pass a list of dictionaries directly to `run_experiment()`. This is the quickest approach for small, inline datasets.
+
+```python
+from patronus.experiments import run_experiment
+
+dataset = [
+    {
+        "task_input": "What is machine learning?",
+        "gold_answer": "Machine learning is a subfield of artificial intelligence.",
+        "tags": {"category": "ai", "difficulty": "beginner"},
+        "difficulty": "beginner",
+    },
+    {
+        "task_input": "Explain quantum computing",
+        "gold_answer": "Quantum computing uses quantum-mechanical phenomena.",
+        "tags": {"category": "physics", "difficulty": "advanced"},
+        "difficulty": "advanced",
+    },
+]
+
+experiment = run_experiment(
+    dataset=dataset,
+    task=my_task,
+    evaluators=[my_evaluator],
+)
+```
+
+  </Tab>
+  <Tab title="CSV">
+
+Use `read_csv()` to load a CSV file. By default the function looks for columns named after the standard field names. Pass keyword arguments to remap custom column names.
+
+```python
+from patronus.datasets import read_csv
+from patronus.experiments import run_experiment
+
+# Default column names match the standard schema
+dataset = read_csv("questions.csv")
+
+# Custom column names mapped to standard fields
+dataset = read_csv(
+    "custom.csv",
+    task_input_field="question",
+    gold_answer_field="answer",
+    system_prompt_field="instruction",
+    tags_field="metadata",
+)
+
+experiment = run_experiment(dataset=dataset, task=my_task, evaluators=[my_evaluator])
+```
+
+  </Tab>
+  <Tab title="JSONL">
+
+Use `read_jsonl()` for JSON Lines files. It accepts the same field-mapping keyword arguments as `read_csv()`.
+
+```python
+from patronus.datasets import read_jsonl
+from patronus.experiments import run_experiment
+
+dataset = read_jsonl(
+    "custom.jsonl",
+    task_input_field="question",
+    gold_answer_field="answer",
+    system_prompt_field="instruction",
+    tags_field="metadata",
+)
+
+experiment = run_experiment(dataset=dataset, task=my_task, evaluators=[my_evaluator])
+```
+
+  </Tab>
+  <Tab title="DataFrame">
+
+Pass a pandas `DataFrame` directly. Column names become field names on each `Row`.
+
+```python
+import pandas as pd
+from patronus.experiments import run_experiment
+
+df = pd.DataFrame({
+    "task_input": ["What is Python?", "What is JavaScript?"],
+    "gold_answer": [
+        "Python is a programming language.",
+        "JavaScript is a programming language.",
+    ],
+    "tags": [{"type": "backend"}, {"type": "frontend"}],
+    "language_type": ["backend", "frontend"],
+})
+
+experiment = run_experiment(dataset=df, task=my_task, evaluators=[my_evaluator])
+```
+
+  </Tab>
+  <Tab title="Remote dataset">
+
+`RemoteDatasetLoader` fetches a dataset stored on the Patronus platform. It resolves asynchronously when the experiment starts, and maps the API response to the standard field schema automatically.
+
+```python
+from patronus.datasets import RemoteDatasetLoader
+from patronus.experiments import run_experiment
+
+# Load by dataset name
+remote_dataset = RemoteDatasetLoader("financebench")
+
+# Load by dataset ID
+remote_dataset = RemoteDatasetLoader(by_id="d-eo6a5zy3nwach69b")
+
+experiment = run_experiment(
+    dataset=remote_dataset,
+    task=my_task,
+    evaluators=[my_evaluator],
+)
+```
+
+<Note>
+  Remote datasets follow the same structure and field conventions as local datasets, so you can swap between local and remote sources without changing your task or evaluator code.
+</Note>
+
+  </Tab>
+</Tabs>
+
+## The `Dataset` class
+
+You can construct a `Dataset` directly when you need explicit control over the dataset ID or when building one programmatically.
+
+```python
+from patronus.datasets import Dataset
+
+# Create from a list of records with an explicit dataset ID
+dataset = Dataset.from_records(
+    records=[
+        {"task_input": "Question 1", "gold_answer": "Answer 1"},
+        {"task_input": "Question 2", "gold_answer": "Answer 2"},
+    ],
+    dataset_id="qa-dataset-v1",
+)
+
+# Create from records with explicit sample IDs
+dataset = Dataset.from_records([
+    {"sid": "q1", "task_input": "Question 1", "gold_answer": "Answer 1"},
+    {"sid": "q2", "task_input": "Question 2", "gold_answer": "Answer 2"},
+])
+
+# Create from a DataFrame
+dataset = Dataset.from_dataframe(df, dataset_id="my-dataset")
+```
+
+If you don't provide `sid` values, the SDK generates sequential integer strings (`"1"`, `"2"`, …) automatically.
+
+## Custom schemas and field mapping
+
+If your dataset uses different column names, you have two options:
+
+**Option 1 — map fields at load time** using the field-mapping parameters of `read_csv()` or `read_jsonl()`:
+
+```python
+from patronus.datasets import read_csv
+
+dataset = read_csv(
+    "data.csv",
+    task_input_field="question",
+    gold_answer_field="answer",
+    tags_field="metadata",
+)
+```
+
+**Option 2 — use a custom adapter** that transforms your fields inside the evaluator:
+
+```python
+from patronus import evaluator
+from patronus.experiments import run_experiment, FuncEvaluatorAdapter
+
+@evaluator()
+def my_evaluator(*, expected, actual, context):
+    ...
+
+class CustomAdapter(FuncEvaluatorAdapter):
+    def transform(self, row, task_result, parent, **kwargs):
+        return [], {
+            "expected": row.reference_answer,   # custom column name
+            "actual": task_result.output if task_result else None,
+            "context": row.additional_info,     # custom column name
+        }
+
+experiment = run_experiment(
+    dataset=custom_dataset,
+    evaluators=[CustomAdapter(my_evaluator)],
+)
+```
+
+<Tip>
+  Use the standard field names whenever possible. It removes the need for custom adapters and makes your datasets portable across evaluators and experiments.
+</Tip>

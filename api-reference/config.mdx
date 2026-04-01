@@ -1,0 +1,130 @@
+---
+title: "Config"
+description: "SDK configuration class and accessor function for the Patronus Python SDK."
+---
+
+Configuration is loaded from environment variables (prefixed `PATRONUS_`) and an optional `patronus.yaml` file. The `config()` function returns a singleton `Config` object.
+
+## Configuration sources
+
+Values are resolved in this order:
+
+1. `patronus.yaml` in the current working directory
+2. Environment variables with the `PATRONUS_` prefix
+3. Default values
+
+## `config()`
+
+```python
+from patronus.config import config
+
+cfg = config()
+```
+
+Returns the `Config` singleton. The object is created on first call and cached.
+
+<ResponseField name="Config" type="object">
+  A `pydantic_settings.BaseSettings` instance with all SDK configuration fields.
+</ResponseField>
+
+## `Config` fields
+
+<ResponseField name="api_key" type="str | None" default="None">
+  Authentication key for Patronus services.
+
+  **Env var:** `PATRONUS_API_KEY`
+</ResponseField>
+
+<ResponseField name="api_url" type="str" default="https://api.patronus.ai">
+  URL for the Patronus API.
+
+  **Env var:** `PATRONUS_API_URL`
+</ResponseField>
+
+<ResponseField name="otel_endpoint" type="str" default="https://otel.patronus.ai:4317">
+  Endpoint for OpenTelemetry data collection.
+
+  **Env var:** `PATRONUS_OTEL_ENDPOINT`
+</ResponseField>
+
+<ResponseField name="otel_exporter_otlp_protocol" type='"grpc" | "http/protobuf" | None' default="None">
+  Forces the OpenTelemetry exporter protocol. When not set, falls back to `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`, or `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL`. Default behavior uses gRPC.
+
+  **Env var:** `PATRONUS_OTEL_EXPORTER_OTLP_PROTOCOL`
+</ResponseField>
+
+<ResponseField name="ui_url" type="str" default="https://app.patronus.ai">
+  URL for the Patronus UI.
+
+  **Env var:** `PATRONUS_UI_URL`
+</ResponseField>
+
+<ResponseField name="service" type="str">
+  Service name for OpenTelemetry traces. Defaults to `OTEL_SERVICE_NAME` env var, then `platform.node()`, then `"unknown_service"`.
+
+  **Env var:** `PATRONUS_SERVICE`
+</ResponseField>
+
+<ResponseField name="project_name" type="str" default="Global">
+  Name of the project for organizing evaluations and experiments.
+
+  **Env var:** `PATRONUS_PROJECT_NAME`
+</ResponseField>
+
+<ResponseField name="app" type="str" default="default">
+  Name of the application within the project.
+
+  **Env var:** `PATRONUS_APP`
+</ResponseField>
+
+<ResponseField name="timeout_s" type="int" default="300">
+  Timeout in seconds for HTTP requests to Patronus APIs. Remote evaluations may be slow, so this value is higher than typical API timeouts.
+
+  **Env var:** `PATRONUS_TIMEOUT_S`
+</ResponseField>
+
+<ResponseField name="resource_dir" type="str" default="./patronus">
+  Base directory where local Patronus resources are stored. Prompts are stored at `<resource_dir>/prompts/`.
+
+  **Env var:** `PATRONUS_RESOURCE_DIR`
+</ResponseField>
+
+<ResponseField name="prompt_providers" type="list[str]" default='["local", "api"]'>
+  Ordered list of prompt providers. Providers are tried in sequence until one succeeds. Available values: `"local"`, `"api"`, `"cache"`.
+
+  **Env var:** `PATRONUS_PROMPT_PROVIDERS`
+</ResponseField>
+
+<ResponseField name="prompt_templating_engine" type='"f-string" | "mustache" | "jinja2"' default='"f-string"'>
+  Default templating engine for rendering prompts with variables.
+
+  **Env var:** `PATRONUS_PROMPT_TEMPLATING_ENGINE`
+</ResponseField>
+
+## `patronus.yaml`
+
+You can place a `patronus.yaml` file in your working directory to configure the SDK without environment variables:
+
+```yaml patronus.yaml
+api_key: "pat-your-api-key"
+project_name: "my-project"
+app: "my-service"
+timeout_s: 120
+prompt_providers:
+  - local
+  - api
+```
+
+## Example
+
+```python
+from patronus.config import config
+
+cfg = config()
+print(cfg.project_name)  # "Global" (or value from env/yaml)
+print(cfg.api_url)        # "https://api.patronus.ai"
+```
+
+<Note>
+  If `api_url` is set to a non-default value, `otel_endpoint` must also be updated to point to the same environment. The SDK validates this at startup.
+</Note>

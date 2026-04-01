@@ -1,0 +1,200 @@
+---
+title: "Patronus clients"
+description: "Synchronous and asynchronous high-level clients for running multiple evaluators in parallel."
+---
+
+The `Patronus` and `AsyncPatronus` classes provide a convenient interface for running multiple evaluators concurrently against a single input. They handle thread/task management and bundle evaluation results together.
+
+<Note>
+  Both clients require `patronus.init()` to be called first so that evaluations are recorded.
+</Note>
+
+## `Patronus` (synchronous)
+
+```python
+from patronus import Patronus
+```
+
+### Constructor
+
+```python
+Patronus(workers=10, shutdown_on_exit=True)
+```
+
+<ParamField path="workers" type="int" default="10">
+  Number of threads in the worker pool for parallel evaluation.
+</ParamField>
+
+<ParamField path="shutdown_on_exit" type="bool" default="True">
+  Whether to register an `atexit` handler that calls `close()` when the process exits.
+</ParamField>
+
+### `evaluate()`
+
+Run one or more evaluators in parallel and wait for all results.
+
+```python
+container = client.evaluate(
+    evaluators,
+    *,
+    system_prompt=None,
+    task_context=None,
+    task_input=None,
+    task_output=None,
+    gold_answer=None,
+    task_metadata=None,
+    return_exceptions=False,
+) -> EvaluationContainer
+```
+
+<ParamField path="evaluators" type="list[Evaluator] | Evaluator" required>
+  One or more evaluators to run. Each evaluator may be:
+  - A `StructuredEvaluator` instance
+  - A `dict` with keys `evaluator_id` and optionally `criteria`
+  - A `tuple[str, str]` of `(evaluator_id, criteria)`
+</ParamField>
+
+<ParamField path="system_prompt" type="str | None" default="None">
+  The system prompt sent to the model being evaluated.
+</ParamField>
+
+<ParamField path="task_context" type="list[str] | str | None" default="None">
+  Retrieved context provided to the model (for RAG evaluation).
+</ParamField>
+
+<ParamField path="task_input" type="str | None" default="None">
+  User input sent to the model.
+</ParamField>
+
+<ParamField path="task_output" type="str | None" default="None">
+  Model response to evaluate.
+</ParamField>
+
+<ParamField path="gold_answer" type="str | None" default="None">
+  Expected correct answer for reference-based evaluation.
+</ParamField>
+
+<ParamField path="task_metadata" type="dict | None" default="None">
+  Arbitrary metadata to pass to evaluators.
+</ParamField>
+
+<ParamField path="return_exceptions" type="bool" default="False">
+  When `True`, exceptions from individual evaluators are returned as values instead of being raised.
+</ParamField>
+
+**Returns:** `EvaluationContainer` — a list-like object containing one `EvaluationResult` per evaluator.
+
+### `evaluate_bg()`
+
+Run evaluators in the background and return immediately.
+
+```python
+task = client.evaluate_bg(evaluators, *, ...) -> TypedAsyncResult[EvaluationContainer]
+```
+
+Accepts the same parameters as `evaluate()` (except `return_exceptions`). Call `task.get()` to wait for the result.
+
+### `close()`
+
+Shut down the thread pools and wait for all in-flight evaluations to complete.
+
+```python
+client.close()
+```
+
+`Patronus` also supports use as a context manager:
+
+```python
+with Patronus() as client:
+    results = client.evaluate(...)
+```
+
+---
+
+## `AsyncPatronus` (asynchronous)
+
+```python
+from patronus import AsyncPatronus
+```
+
+### Constructor
+
+```python
+AsyncPatronus(max_workers=10)
+```
+
+<ParamField path="max_workers" type="int" default="10">
+  Maximum number of concurrent evaluation coroutines.
+</ParamField>
+
+### `evaluate()`
+
+Async version of `evaluate()`. Returns the same `EvaluationContainer`.
+
+```python
+container = await client.evaluate(
+    evaluators,
+    *,
+    system_prompt=None,
+    task_context=None,
+    task_input=None,
+    task_output=None,
+    gold_answer=None,
+    task_metadata=None,
+    return_exceptions=False,
+) -> EvaluationContainer
+```
+
+Accepts the same parameters as `Patronus.evaluate()`. Supports `StructuredEvaluator`, `AsyncStructuredEvaluator`, dicts, and tuples.
+
+### `evaluate_bg()`
+
+Schedule an evaluation as a background `asyncio.Task`.
+
+```python
+task = client.evaluate_bg(evaluators, *, ...) -> asyncio.Task[EvaluationContainer]
+```
+
+The task runs concurrently. `await` it when you need the result.
+
+### `close()`
+
+Wait for all pending background tasks to complete.
+
+```python
+await client.close()
+```
+
+`AsyncPatronus` also supports async context manager:
+
+```python
+async with AsyncPatronus() as client:
+    results = await client.evaluate(...)
+```
+
+---
+
+## Example
+
+```python
+import patronus
+from patronus import Patronus
+from patronus.evals import RemoteEvaluator
+
+patronus.init()
+
+client = Patronus()
+
+results = client.evaluate(
+    evaluators=[
+        RemoteEvaluator("lynx", "patronus:hallucination"),
+        RemoteEvaluator("judge", "patronus:is-concise"),
+    ],
+    task_input="What is the capital of France?",
+    task_output="The capital of France is Paris.",
+    gold_answer="Paris",
+)
+
+for result in results:
+    print(result.pass_, result.score)
+```

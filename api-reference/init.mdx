@@ -1,0 +1,108 @@
+---
+title: "init()"
+description: "Initialize the Patronus SDK with project details, API connections, and telemetry."
+---
+
+The `init()` function must be called before using evaluators to ensure results are recorded. Call it once at application startup.
+
+<Note>
+  Do not call `init()` when running experiments. Experiments have their own initialization via `run_experiment()` or `Experiment.create()`.
+</Note>
+
+## Signature
+
+```python
+import patronus
+
+patronus.init(
+    project_name=None,
+    app=None,
+    api_url=None,
+    otel_endpoint=None,
+    otel_exporter_otlp_protocol=None,
+    api_key=None,
+    service=None,
+    resource_dir=None,
+    prompt_providers=None,
+    prompt_templating_engine=None,
+    integrations=None,
+) -> PatronusContext
+```
+
+## Parameters
+
+<ParamField path="project_name" type="str | None" default="None">
+  Name of the project for organizing evaluations. Falls back to `patronus.yaml`, then defaults to `"Global"`.
+</ParamField>
+
+<ParamField path="app" type="str | None" default="None">
+  Name of the application within the project. Falls back to `patronus.yaml`, then defaults to `"default"`.
+</ParamField>
+
+<ParamField path="api_key" type="str | None" default="None">
+  Authentication key for Patronus services. Falls back to the `PATRONUS_API_KEY` environment variable.
+</ParamField>
+
+<ParamField path="api_url" type="str | None" default="None">
+  URL for the Patronus API. Falls back to `PATRONUS_API_URL` or `https://api.patronus.ai`.
+
+  If you set a non-default `api_url`, you must also set `otel_endpoint` to point to the same environment.
+</ParamField>
+
+<ParamField path="otel_endpoint" type="str | None" default="None">
+  Endpoint for OpenTelemetry data collection. Falls back to `PATRONUS_OTEL_ENDPOINT` or `https://otel.patronus.ai:4317`.
+</ParamField>
+
+<ParamField path="otel_exporter_otlp_protocol" type="str | None" default="None">
+  OpenTelemetry exporter protocol. Accepted values: `"grpc"` or `"http/protobuf"`. Falls back to standard OTEL environment variables, then defaults to gRPC.
+</ParamField>
+
+<ParamField path="service" type="str | None" default="None">
+  Service name for OpenTelemetry traces. Falls back to `OTEL_SERVICE_NAME`, then `platform.node()`.
+</ParamField>
+
+<ParamField path="resource_dir" type="str | None" default="None">
+  Base directory for local Patronus resources (e.g. prompts). Falls back to `patronus.yaml`, then defaults to `./patronus`.
+</ParamField>
+
+<ParamField path="prompt_providers" type="list[str] | None" default="None">
+  Ordered list of prompt providers. Falls back to `patronus.yaml`, then defaults to `["local", "api"]`.
+</ParamField>
+
+<ParamField path="prompt_templating_engine" type="str | None" default="None">
+  Default templating engine for prompts. Falls back to `patronus.yaml`, then defaults to `"f-string"`.
+</ParamField>
+
+<ParamField path="integrations" type="list | None" default="None">
+  List of integrations to enable. Each entry may be a `BasePatronusIntegrator` instance or an OpenTelemetry `BaseInstrumentor` instance. See [Integrations](/api-reference/integrations).
+</ParamField>
+
+## Return value
+
+<ResponseField name="PatronusContext" type="object">
+  The initialized context object. Contains scope, tracer provider, logger provider, API clients, and evaluation exporter. You rarely need to interact with this object directly.
+</ResponseField>
+
+<Note>
+  `init()` is idempotent — calling it more than once emits a `UserWarning` and the duplicate call is ignored.
+</Note>
+
+## Example
+
+```python
+import patronus
+
+# Minimal — reads config from environment variables or patronus.yaml
+patronus.init()
+
+# Explicit configuration
+patronus.init(
+    project_name="my-project",
+    app="recommendation-service",
+    api_key="pat-your-api-key",
+)
+```
+
+<Tip>
+  Set `PATRONUS_API_KEY` in your environment to avoid hard-coding your API key in source code.
+</Tip>

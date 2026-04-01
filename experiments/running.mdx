@@ -1,0 +1,314 @@
+---
+title: "Running experiments"
+description: "Configure run_experiment(), use evaluator adapters, control concurrency, and export results."
+---
+
+The main entry point for the experimentation framework is `run_experiment()`. This page walks through the full configuration, the evaluator adapter types, and how to export results after the experiment finishes.
+
+## Setting up an experiment
+
+<Steps>
+  <Step title="Define your dataset">
+    Provide a list of dicts, a CSV file, a DataFrame, or a remote dataset loader. See [Datasets](/experiments/datasets) for all options.
+
+    ```python
+    dataset = [
+        {"task_input": "What is the capital of France?", "gold_answer": "Paris"},
+        {"task_input": "Who wrote Romeo and Juliet?", "gold_answer": "William Shakespeare"},
+    ]
+    ```
+  </Step>
+  <Step title="Write a task function">
+    Define a function that processes each row. Return a string or `TaskResult`. Omit the task entirely if your dataset already has `task_output` values.
+
+    ```python
+    def answer_question(row, **kwargs):
+        if "France" in row.task_input:
+            return "The capital of France is Paris."
+        elif "Romeo and Juliet" in row.task_input:
+            return "Romeo and Juliet was written by William Shakespeare."
+        return "I don't know the answer to that question."
+    ```
+  </Step>
+  <Step title="Choose evaluators">
+    Pick from remote evaluators, class-based evaluators, or function evaluators wrapped in an adapter. You can combine multiple evaluator types in a single experiment.
+
+    ```python
+    from patronus import evaluator, RemoteEvaluator
+    from patronus.experiments import FuncEvaluatorAdapter
+
+    @evaluator()
+    def contains_answer(task_result, row, **kwargs) -> bool:
+        if not task_result or not row.gold_answer:
+            return False
+        return row.gold_answer.lower() in task_result.output.lower()
+
+    evaluators = [
+        RemoteEvaluator("judge", "patronus:fuzzy-match"),
+        FuncEvaluatorAdapter(contains_answer),
+    ]
+    ```
+  </Step>
+  <Step title="Call run_experiment()">
+    Pass your dataset, task, and evaluators. The function blocks until the experiment finishes and returns an `Experiment` object.
+
+    ```python
+    from patronus.experiments import run_experiment
+
+    experiment = run_experiment(
+        dataset=dataset,
+        task=answer_question,
+        evaluators=evaluators,
+        tags={"model": "simulated", "version": "v1"},
+    )
+    ```
+  </Step>
+  <Step title="Export the results">
+    Save results to CSV or convert to a DataFrame for further analysis.
+
+    ```python
+    experiment.to_csv("results.csv")
+    df = experiment.to_dataframe()
+    ```
+  </Step>
+</Steps>
+
+## `run_experiment()` parameters
+
+<ParamField path="dataset" type="Dataset | DatasetLoader | list[dict] | tuple[dict] | DataFrame | Awaitable | Callable" required>
+  The dataset to evaluate. Accepts a `Dataset` instance, a `RemoteDatasetLoader`, a list or tuple of dicts, a pandas `DataFrame`, a coroutine, or a callable that returns any of those. See [Datasets](/experiments/datasets).
+</ParamField>
+
+<ParamField path="task" type="Callable | None" default="None">
+  A function (sync or async) that processes each dataset row. Mutually exclusive with `chain`. Omit when your dataset already contains `task_output` values.
+</ParamField>
+
+<ParamField path="evaluators" type="list" default="None">
+  A list of evaluators. Each item can be a `StructuredEvaluator`, `AsyncStructuredEvaluator`, or any `BaseEvaluatorAdapter` subclass (including `FuncEvaluatorAdapter`). Mutually exclusive with `chain`.
+</ParamField>
+
+<ParamField path="chain" type="list[ChainLink] | None" default="None">
+  A list of `{task, evaluators}` dicts for multi-stage pipelines. Mutually exclusive with `task` and `evaluators`. See [Advanced experiments](/experiments/advanced).
+</ParamField>
+
+<ParamField path="tags" type="dict[str, str] | None" default="None">
+  Key-value tags applied to all evaluation results in the experiment. Tags from the dataset row are merged in; experiment-level tags take precedence.
+</ParamField>
+
+<ParamField path="max_concurrency" type="int" default="10">
+  Maximum number of task and evaluation operations to run concurrently.
+</ParamField>
+
+<ParamField path="project_name" type="str | None" default="None">
+  Name of the Patronus project to create or reuse. Falls back to the value from `patronus.init()` or the `PATRONUS_PROJECT_NAME` environment variable.
+</ParamField>
+
+<ParamField path="experiment_name" type="str | None" default="None">
+  A name for this experiment run. A Unix timestamp is appended automatically to ensure uniqueness.
+</ParamField>
+
+<ParamField path="integrations" type="list | None" default="None">
+  A list of OpenTelemetry instrumentors (e.g. `OpenAIInstrumentor()`) for automatic tracing of third-party libraries.
+</ParamField>
+
+<ParamField path="api_key" type="str | None" default="None">
+  Patronus API key. Falls back to `PATRONUS_API_KEY` environment variable.
+</ParamField>
+
+<ParamField path="api_url" type="str | None" default="None">
+  Patronus API base URL. Use this for on-premises deployments.
+</ParamField>
+
+<ParamField path="otel_endpoint" type="str | None" default="None">
+  OpenTelemetry collector endpoint for trace export.
+</ParamField>
+
+<ParamField path="timeout_s" type="int | None" default="None">
+  Timeout in seconds for API operations.
+</ParamField>
+
+## Evaluator adapters
+
+`run_experiment()` accepts three evaluator types. `StructuredEvaluator` and `AsyncStructuredEvaluator` instances are used directly. Function-based evaluators decorated with `@evaluator()` must be wrapped in a `FuncEvaluatorAdapter`.
+
+### `FuncEvaluatorAdapter` — wrapping `@evaluator()` functions
+
+The default `transform()` method passes `row`, `task_result`, and `parent` as keyword arguments to your evaluator function:
+
+```python
+from patronus import evaluator
+from patronus.datasets import Row
+from patronus.experiments.types import TaskResult
+from patronus.evals import EvaluationResult
+from patronus.experiments import run_experiment, FuncEvaluatorAdapter
+
+@evaluator()
+def contains_answer(
+    row: Row,
+    task_result: TaskResult,
+    **kwargs,
+) -> EvaluationResult | None:
+    if not task_result or not task_result.output:
+        return None
+    if row.gold_answer and row.gold_answer.lower() in task_result.output.lower():
+        return EvaluationResult(score=1.0, pass_=True, text_output="Contains answer")
+    return EvaluationResult(score=0.0, pass_=False, text_output="Missing answer")
+
+experiment = run_experiment(
+    dataset=dataset,
+    task=my_task,
+    evaluators=[FuncEvaluatorAdapter(contains_answer)],
+)
+```
+
+### Custom `FuncEvaluatorAdapter` — mapping non-standard signatures
+
+If your evaluator function has a different parameter signature, subclass `FuncEvaluatorAdapter` and override `transform()`:
+
+```python
+from patronus import evaluator
+from patronus.datasets import Row
+from patronus.experiments.types import TaskResult, EvalParent
+from patronus.experiments import FuncEvaluatorAdapter
+
+@evaluator()
+def exact_match(expected: str, actual: str, case_sensitive: bool = False) -> bool:
+    if not case_sensitive:
+        return expected.lower() == actual.lower()
+    return expected == actual
+
+class ExactMatchAdapter(FuncEvaluatorAdapter):
+    def __init__(self, case_sensitive=False):
+        super().__init__(exact_match)
+        self.case_sensitive = case_sensitive
+
+    def transform(
+        self,
+        row: Row,
+        task_result: TaskResult,
+        parent: EvalParent,
+        **kwargs,
+    ) -> tuple[list, dict]:
+        return [], {
+            "expected": row.gold_answer,
+            "actual": task_result.output if task_result else "",
+            "case_sensitive": self.case_sensitive,
+        }
+
+experiment = run_experiment(
+    dataset=dataset,
+    task=my_task,
+    evaluators=[ExactMatchAdapter(case_sensitive=False)],
+)
+```
+
+### `StructuredEvaluator` — class-based evaluators
+
+`StructuredEvaluator` instances are used directly in the `evaluators` list. The framework wraps them in `StructuredEvaluatorAdapter` automatically:
+
+```python
+from patronus import StructuredEvaluator, EvaluationResult
+from patronus.experiments import run_experiment
+
+class LengthEvaluator(StructuredEvaluator):
+    def __init__(self, max_length: int):
+        self.max_length = max_length
+
+    def evaluate(self, *, task_output: str = None, **kwargs) -> EvaluationResult:
+        if not task_output:
+            return EvaluationResult(pass_=False, score=0.0)
+        passed = len(task_output) <= self.max_length
+        return EvaluationResult(
+            pass_=passed,
+            score=1.0 if passed else 0.0,
+            explanation=f"Output length: {len(task_output)} (limit: {self.max_length})",
+        )
+
+experiment = run_experiment(
+    dataset=dataset,
+    task=my_task,
+    evaluators=[LengthEvaluator(max_length=200)],
+)
+```
+
+## Evaluator weights
+
+Assign a `weight` to any evaluator to record its relative importance as experiment metadata. Weights are stored automatically under the `evaluator_weights` key.
+
+```python
+from patronus.evals import RemoteEvaluator
+from patronus.experiments import run_experiment, FuncEvaluatorAdapter
+
+experiment = run_experiment(
+    dataset=dataset,
+    task=my_task,
+    evaluators=[
+        RemoteEvaluator("judge", "patronus:fuzzy-match", weight=0.6),
+        FuncEvaluatorAdapter(contains_answer, weight="0.4"),
+    ],
+)
+# Stored metadata:
+# "evaluator_weights": {
+#     "judge:patronus:fuzzy-match": "0.6",
+#     "contains_answer:": "0.4"
+# }
+```
+
+<Note>
+  Weights must be valid decimal numbers supplied as strings or floats (e.g. `0.4` or `"0.4"`). The same evaluator cannot have different weights within the same experiment.
+</Note>
+
+## Sync and async execution
+
+`run_experiment()` is context-aware:
+
+```python
+# Synchronous context — blocks until complete
+experiment = run_experiment(dataset, task=my_task, evaluators=evaluators)
+
+# Async context — must be awaited
+experiment = await run_experiment(dataset, task=my_task, evaluators=evaluators)
+```
+
+## Exporting results
+
+After the experiment completes, access the results in two ways:
+
+<CodeGroup>
+
+```python To CSV
+experiment.to_csv("results.csv")
+```
+
+```python To DataFrame
+df = experiment.to_dataframe()
+print(df.head())
+```
+
+</CodeGroup>
+
+The exported data includes dataset inputs, task outputs, evaluation scores, pass/fail flags, explanations, metadata, and timing information.
+
+## Manual experiment control
+
+For fine-grained control, create and run the experiment as separate steps using `Experiment.create()`:
+
+```python
+from patronus.experiments import Experiment
+
+experiment = await Experiment.create(
+    dataset=dataset,
+    task=my_task,
+    evaluators=evaluators,
+    project_name="My Project",
+)
+
+# Perform any additional setup here
+
+await experiment.run()
+experiment.to_csv("results.csv")
+```
+
+<Note>
+  `Experiment.create()` is an async classmethod. Use `run_experiment()` for the common case where you don't need to perform setup between creation and execution.
+</Note>

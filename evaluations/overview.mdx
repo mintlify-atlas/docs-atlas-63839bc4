@@ -1,0 +1,110 @@
+---
+title: "Evaluations overview"
+description: "Understand how Patronus evaluations work and choose between custom and remote evaluators."
+---
+
+Evaluations are the core mechanism for measuring LLM output quality in Patronus. An evaluation takes an LLM's input and output — along with optional context and a gold answer — and produces a structured result that tells you whether the response passed, how it scored, and why.
+
+Running evaluations consistently lets you catch regressions, compare model versions, and build confidence that your LLM application behaves correctly across a wide range of inputs.
+
+## Two evaluator types
+
+Patronus provides two complementary approaches:
+
+<CardGroup cols={2}>
+  <Card title="Custom evaluators" icon="code" href="/evaluations/custom-evaluators">
+    Write Python functions or classes that implement your own evaluation logic. Use the `@evaluator()` decorator or inherit from `Evaluator`, `StructuredEvaluator`, or `AsyncStructuredEvaluator`.
+  </Card>
+  <Card title="Remote evaluators" icon="cloud" href="/evaluations/remote-evaluators">
+    Call Patronus-managed evaluators that run on Patronus infrastructure. Use `RemoteEvaluator` to access evaluators like `judge` and `lynx` with configurable criteria.
+  </Card>
+</CardGroup>
+
+## The `EvaluationResult` object
+
+Every evaluator — whether custom or remote — produces an `EvaluationResult`. You can return it directly from your evaluator, or return a simpler type (`bool`, `float`, `str`) that the SDK converts automatically.
+
+```python
+from patronus.evals import EvaluationResult
+
+result = EvaluationResult(
+    score=0.85,
+    pass_=True,
+    text_output="Satisfactory",
+    explanation="Response contains all required key terms.",
+    metadata={"word_count": 42, "has_citations": True},
+    tags={"environment": "production", "model": "gpt-4o"},
+)
+```
+
+### Fields
+
+<ResponseField name="score" type="float | None">
+  Numeric assessment of the evaluation. Typically ranges from 0 to 1, where 1 is the best possible score. Optional — omit if your evaluator only produces a pass/fail decision.
+</ResponseField>
+
+<ResponseField name="pass_" type="bool | None">
+  Whether the evaluation is considered to have passed. Optional — omit if your evaluator only produces a numeric score.
+</ResponseField>
+
+<ResponseField name="text_output" type="str | None">
+  A categorical or short textual label for the result, such as `"Satisfactory"` or `"Hallucinated"`. Useful for discrete classification evaluators.
+</ResponseField>
+
+<ResponseField name="explanation" type="str | None">
+  A human-readable explanation of why the result was produced. Shown in the Patronus platform and useful for debugging.
+</ResponseField>
+
+<ResponseField name="metadata" type="dict | None">
+  Arbitrary JSON-serializable data to attach to the evaluation. Use this to store intermediate computation results or diagnostic information.
+</ResponseField>
+
+<ResponseField name="tags" type="dict[str, str] | None">
+  Key-value string pairs for filtering and grouping evaluations in the Patronus platform (for example, `{"env": "staging"}`).
+</ResponseField>
+
+## Minimal working example
+
+```python
+import patronus
+from patronus.evals import evaluator, EvaluationResult
+
+patronus.init()
+
+@evaluator()
+def exact_match(actual: str, expected: str) -> bool:
+    return actual.strip() == expected.strip()
+
+result = exact_match("Paris", "Paris")
+print(f"Passed: {result}")  # Output: Passed: True
+```
+
+<Tip>
+  Call `patronus.init()` before running any evaluators. This authenticates with the Patronus platform and enables result export and tracing. Decorated functions still execute without it, but results are not recorded.
+</Tip>
+
+## Automatic type coercion
+
+When you return a primitive type from an `@evaluator()`-decorated function, the SDK converts it to an `EvaluationResult` automatically:
+
+| Return type | Resulting `EvaluationResult` |
+|---|---|
+| `True` / `False` | `pass_=True/False`, `score=1.0/0.0` |
+| `0.85` (float or int) | `score=0.85` |
+| `"positive"` (str) | `text_output="positive"` |
+| `EvaluationResult(...)` | Passed through unchanged |
+| `None` | Evaluation is skipped — nothing is recorded |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Custom evaluators" icon="code" href="/evaluations/custom-evaluators">
+    Learn how to write function-based and class-based evaluators.
+  </Card>
+  <Card title="Remote evaluators" icon="cloud" href="/evaluations/remote-evaluators">
+    Use Patronus-managed evaluators with a single line of code.
+  </Card>
+  <Card title="Batching evaluations" icon="layer-group" href="/evaluations/batching">
+    Run multiple evaluators in parallel with the `Patronus` client.
+  </Card>
+</CardGroup>

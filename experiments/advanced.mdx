@@ -1,0 +1,250 @@
+---
+title: "Advanced experiments"
+description: "Multi-stage chains, concurrency controls, OpenTelemetry integrations, and async experiments."
+---
+
+This page covers features for more complex evaluation workflows: multi-stage chains, concurrency tuning, OpenTelemetry integrations, custom experiment naming, and async usage.
+
+## Multi-stage evaluation chains
+
+When your pipeline has more than one processing step — for example, generate a summary, then ask questions about it — use the `chain` parameter instead of `task` and `evaluators`. Each entry in the chain is a dict with a `task` and a list of `evaluators`.
+
+```python
+from patronus.experiments import run_experiment
+from patronus.evals import RemoteEvaluator
+
+experiment = run_experiment(
+    dataset=dataset,
+    chain=[
+        # Stage 1: generate a summary and evaluate it
+        {
+            "task": generate_summary,
+            "evaluators": [
+                RemoteEvaluator("judge", "conciseness"),
+                RemoteEvaluator("judge", "coherence"),
+            ],
+        },
+        # Stage 2: generate questions from the summary
+        {
+            "task": generate_questions,
+            "evaluators": [
+                RemoteEvaluator("judge", "relevance"),
+            ],
+        },
+        # Stage 3: answer the questions
+        {
+            "task": answer_questions,
+            "evaluators": [
+                RemoteEvaluator("judge", "factual-accuracy"),
+                RemoteEvaluator("judge", "helpfulness"),
+            ],
+        },
+    ],
+)
+```
+
+Each stage can:
+- Apply its own task function, or set `task` to `None` if no additional processing is needed
+- Use its own evaluators
+- Access the previous stage's outputs and evaluations through the `parent` parameter
+
+<Note>
+  `chain` and `evaluators` are mutually exclusive. Pass one or the other, not both.
+</Note>
+
+### Accessing previous stage results
+
+Tasks in later stages receive a `parent` parameter of type `EvalParent`. Use it to read the previous task's output and its evaluation scores:
+
+```python
+def generate_questions(row, parent, **kwargs):
+    """Generate questions based on a summary from the previous stage."""
+    summary = parent.task.output if parent and parent.task else None
+    if not summary:
+        return None
+
+    # Adapt behavior based on previous evaluation results
+    if parent and parent.evals:
+        coherence = parent.evals.get("judge:coherence")
+        if coherence and coherence.score and coherence.score > 0.8:
+            return f"Detailed questions about: {summary}"
+
+    return f"General questions about: {summary}"
+```
+
+Evaluators in later chain stages can similarly inspect previous results:
+
+```python
+from patronus import evaluator
+from patronus.evals import EvaluationResult
+
+@evaluator()
+def aggregate_score(row, task_result, parent, **kwargs):
+    if not parent or not parent.evals:
+        return None
+
+    conciseness = parent.evals.get("judge:conciseness")
+    coherence = parent.evals.get("judge:coherence")
+
+    avg = ((conciseness.score or 0) + (coherence.score or 0)) / 2
+    return EvaluationResult(score=avg, pass_=avg > 0.7)
+```
+
+## Concurrency controls
+
+The framework processes dataset rows concurrently. Use `max_concurrency` to limit the number of simultaneous task and evaluation operations — important when your task makes API calls subject to rate limits.
+
+```python
+experiment = run_experiment(
+    dataset=large_dataset,
+    task=api_intensive_task,
+    evaluators=[evaluator1, evaluator2],
+    max_concurrency=5,  # at most 5 rows processed at a time
+)
+```
+
+Lower `max_concurrency` when you hit rate-limit errors. Raise it when your API allows higher throughput or when your tasks are CPU-bound.
+
+## OpenTelemetry integrations
+
+Pass a list of OpenTelemetry instrumentors in the `integrations` parameter to enable automatic tracing of third-party libraries. The framework activates the instrumentors for the duration of the experiment.
+
+```python
+from openinference.instrumentation.openai import OpenAIInstrumentor
+from patronus.experiments import run_experiment
+
+experiment = run_experiment(
+    dataset=dataset,
+    task=openai_task,
+    evaluators=[evaluator1, evaluator2],
+    integrations=[OpenAIInstrumentor()],
+)
+```
+
+With OpenAI instrumentation enabled, every API call made inside your task is captured as a child span, including model name, token counts, and latency.
+
+## Organizing experiments
+
+### Project and experiment names
+
+Group related experiments under a project and give each run a descriptive name:
+
+```python
+experiment = run_experiment(
+    dataset=dataset,
+    task=my_task,
+    evaluators=[evaluator1, evaluator2],
+    project_name="RAG System Evaluation",
+    experiment_name="baseline-gpt4-retrieval",
+    # Results in a name like "baseline-gpt4-retrieval-1742834029"
+)
+```
+
+A Unix timestamp is appended automatically so that re-runs never collide.
+
+### Tags for filtering
+
+Tags are propagated to every evaluation result in the experiment and appear as filterable dimensions in the Patronus platform:
+
+```python
+experiment = run_experiment(
+    dataset=dataset,
+    task=my_task,
+    evaluators=[evaluator1, evaluator2],
+    tags={
+        "model": "gpt-4",
+        "version": "2.0",
+        "retrieval_method": "bm25",
+        "environment": "staging",
+    },
+)
+```
+
+<Warning>
+  Experiment-level tags cannot be overridden by task or evaluator code. Use a small set of consistent values for each tag key — high-cardinality tags make filtering and grouping less useful.
+</Warning>
+
+## Async experiments
+
+In an async context — for example, a Jupyter notebook or an async application — await `run_experiment()` directly:
+
+```python
+async def run():
+    experiment = await run_experiment(
+        dataset=dataset,
+        task=async_task,
+        evaluators=evaluators,
+    )
+    experiment.to_csv("results.csv")
+```
+
+For full control over the experiment lifecycle, use `Experiment.create()` and `experiment.run()` separately:
+
+```python
+from patronus.experiments import Experiment
+
+async def run():
+    experiment = await Experiment.create(
+        dataset=dataset,
+        task=my_task,
+        evaluators=evaluators,
+        project_name="My Project",
+    )
+
+    # Perform any setup between creation and execution
+    # ...
+
+    await experiment.run()
+    experiment.to_csv("results.csv")
+```
+
+This pattern is useful when you need to inspect or modify the experiment object before it starts, or when you want to embed the experiment inside a larger async workflow.
+
+## Custom API configuration
+
+For on-premises deployments or custom infrastructure, override the default API endpoints:
+
+```python
+experiment = run_experiment(
+    dataset=dataset,
+    task=my_task,
+    evaluators=[evaluator1, evaluator2],
+    api_key="your-api-key",
+    api_url="https://custom-endpoint.patronus.ai",
+    otel_endpoint="https://custom-telemetry.patronus.ai",
+    timeout_s=120,
+)
+```
+
+## Evaluator weights in chains
+
+Weights work the same way in chains as in single-stage experiments. Assign a `weight` to each evaluator; all weights across all chain stages are collected and stored in the experiment's metadata under `evaluator_weights`.
+
+```python
+from patronus.evals import RemoteEvaluator
+from patronus.experiments import run_experiment, FuncEvaluatorAdapter
+
+experiment = run_experiment(
+    dataset=dataset,
+    chain=[
+        {
+            "task": generate_summary,
+            "evaluators": [
+                RemoteEvaluator("judge", "conciseness", weight=0.5),
+                RemoteEvaluator("judge", "coherence", weight=0.5),
+            ],
+        },
+        {
+            "task": answer_questions,
+            "evaluators": [
+                RemoteEvaluator("judge", "factual-accuracy", weight=0.7),
+                FuncEvaluatorAdapter(custom_check, weight=0.3),
+            ],
+        },
+    ],
+)
+```
+
+<Tip>
+  Consider making weights within each stage sum to 1.0. This makes relative importance easier to reason about when reviewing experiment metadata.
+</Tip>

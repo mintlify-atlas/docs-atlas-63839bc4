@@ -1,0 +1,185 @@
+---
+title: "Quickstart"
+description: "Three practical examples covering tracing, remote evaluation, and experiments."
+keywords: ["quickstart", "tracing", "evaluator", "experiment", "patronus"]
+---
+
+This guide walks you through three core capabilities of the Patronus SDK: tracing function execution, running a remote evaluator, and running a batch experiment.
+
+Before starting, make sure you have [installed the SDK](/getting-started/installation) and set your `PATRONUS_API_KEY` environment variable.
+
+<Steps>
+  <Step title="Initialize the SDK">
+    Call `patronus.init()` once at the start of your script. It reads your API key from the environment or from `patronus.yaml`:
+
+    ```python
+    import patronus
+
+    patronus.init()
+    ```
+
+    You can also pass values directly:
+
+    ```python
+    import patronus
+
+    patronus.init(
+        api_key="your-api-key",
+        project_name="My Project",
+    )
+    ```
+
+    <Note>
+      When running experiments with `run_experiment()`, you do not need to call `init()` — the function handles initialization automatically.
+    </Note>
+  </Step>
+
+  <Step title="Example 1: Tracing with a functional evaluator">
+    Use `@traced()` to capture execution details and `@evaluator()` to define a simple evaluation function:
+
+    ```python
+    import patronus
+    from patronus import evaluator, traced
+
+    patronus.init()
+
+
+    @evaluator()
+    def exact_match(expected: str, actual: str) -> bool:
+        return expected.strip() == actual.strip()
+
+
+    @traced()
+    def process_query(query: str) -> str:
+        # In a real application, this would call an LLM
+        return f"Processed response for: {query}"
+
+
+    @traced()
+    def main():
+        query = "What is machine learning?"
+        response = process_query(query)
+        print(f"Response: {response}")
+
+        expected_response = "Processed response for: What is machine learning?"
+        result = exact_match(expected_response, response)
+        print(f"Evaluation result: {result}")
+
+
+    if __name__ == "__main__":
+        main()
+    ```
+
+    `@traced()` automatically captures timing, inputs, and outputs, making them available in the Patronus platform. `@evaluator()` wraps any function that returns a `bool`, `float`, or `EvaluationResult`.
+  </Step>
+
+  <Step title="Example 2: Using a remote evaluator">
+    `RemoteEvaluator` runs evaluation logic on Patronus infrastructure. This example uses the Lynx hallucination detector:
+
+    ```python
+    import patronus
+    from patronus import traced
+    from patronus.evals import RemoteEvaluator
+
+    patronus.init()
+
+
+    @traced()
+    def generate_insurance_response(query: str) -> str:
+        # In a real application, this would call an LLM
+        return "To even qualify for our car insurance policy, you need to have a valid driver's license that expires later than 2028."
+
+
+    @traced("Quickstart: detect hallucination")
+    def main():
+        check_hallucinates = RemoteEvaluator("lynx", "patronus:hallucination")
+
+        context = """
+        To qualify for our car insurance policy, you need a way to show competence
+        in driving which can be accomplished through a valid driver's license.
+        You must have multiple years of experience and cannot be graduating from driving school before or on 2028.
+        """
+
+        query = "What is the car insurance policy?"
+        response = generate_insurance_response(query)
+
+        resp = check_hallucinates.evaluate(
+            task_input=query,
+            task_context=context,
+            task_output=response,
+        )
+
+        print(f"""
+    Hallucination evaluation:
+    Passed: {resp.pass_}
+    Score: {resp.score}
+    Explanation: {resp.explanation}
+    """)
+
+
+    if __name__ == "__main__":
+        main()
+    ```
+
+    `RemoteEvaluator` accepts the evaluator family (`"lynx"`) and a named criteria (`"patronus:hallucination"`). The result includes `pass_`, `score`, and `explanation` fields.
+  </Step>
+
+  <Step title="Example 3: Running an experiment">
+    `run_experiment()` evaluates a task function over a dataset and collects results. Install the `experiments` extra first if you haven't already:
+
+    ```bash
+    pip install 'patronus[experiments]'
+    ```
+
+    ```python
+    from patronus.evals import evaluator, RemoteEvaluator
+    from patronus.experiments import run_experiment, FuncEvaluatorAdapter, Row, TaskResult
+
+
+    def my_task(row: Row, **kwargs):
+        return f"{row.task_input} World"
+
+
+    is_concise = RemoteEvaluator("judge", "patronus:is-concise")
+
+
+    @evaluator()
+    def exact_match(row: Row, task_result: TaskResult, **kwargs):
+        return task_result.output == row.gold_answer
+
+
+    result = run_experiment(
+        project_name="Tutorial Project",
+        dataset=[
+            {
+                "task_input": "Hello",
+                "gold_answer": "Hello World",
+            },
+        ],
+        task=my_task,
+        evaluators=[is_concise, FuncEvaluatorAdapter(exact_match)],
+    )
+
+    result.to_csv("./experiment.csv")
+    ```
+
+    `run_experiment()` runs `my_task` on each row, passes the output to every evaluator, and returns an aggregated result you can export to CSV or inspect programmatically.
+  </Step>
+</Steps>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="sliders" href="/configuration">
+    Learn about all configuration options and how precedence works
+  </Card>
+  <Card title="Custom evaluators" icon="circle-check" href="/evaluations/custom-evaluators">
+    Define evaluators that return booleans, scores, or structured results
+  </Card>
+  <Card title="Remote evaluators" icon="server" href="/evaluations/remote-evaluators">
+    Use Patronus-managed evaluators for hallucination, relevance, and more
+  </Card>
+  <Card title="Experiments" icon="flask" href="/experiments/introduction">
+    Run systematic evaluations over datasets and track results
+  </Card>
+</CardGroup>

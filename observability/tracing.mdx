@@ -1,0 +1,250 @@
+---
+title: "Tracing"
+description: "Trace function execution and code blocks in your LLM application using the @traced() decorator and start_span() context manager."
+keywords: ["tracing", "spans", "opentelemetry", "traced", "start_span", "distributed tracing"]
+---
+
+Use tracing to monitor timing, inputs, outputs, and exceptions as requests flow through your application. The SDK exports trace data to the Patronus AI Platform over OTLP.
+
+<Tip>
+  For OTLP endpoint and protocol configuration, see [Observability configuration](/observability/configuration).
+</Tip>
+
+## Two ways to trace
+
+<Tabs>
+  <Tab title="@traced() decorator">
+    Apply `@traced()` to a function to create a span that wraps the entire function call. The decorator works on both synchronous and asynchronous functions.
+
+    ```python
+    import patronus
+    from patronus import traced
+
+    patronus.init()
+
+    @traced()
+    def generate_response(prompt: str) -> str:
+        # Your LLM call or processing logic here
+        return f"Response to: {prompt}"
+
+    result = generate_response("Tell me about machine learning")
+    ```
+
+    By default, the span name matches the function's qualified name. You can override it and control what gets logged:
+
+    ```python
+    @traced(
+        span_name="Custom span name",
+        log_args=True,
+        log_results=True,
+        log_exceptions=True,
+        disable_log=False,
+        attributes={"model": "gpt-4", "version": "1.0"}
+    )
+    def my_function():
+        pass
+    ```
+
+    ### Parameters
+
+    <ParamField path="span_name" type="string">
+      Name of the span. Defaults to the function's qualified name (`func.__qualname__`) if not provided.
+    </ParamField>
+
+    <ParamField path="log_args" type="boolean" default="True">
+      Whether to log the arguments passed to the function.
+    </ParamField>
+
+    <ParamField path="log_results" type="boolean" default="True">
+      Whether to log the function's return value.
+    </ParamField>
+
+    <ParamField path="log_exceptions" type="boolean" default="True">
+      Whether to log any exceptions raised during function execution.
+    </ParamField>
+
+    <ParamField path="disable_log" type="boolean" default="False">
+      When `True`, suppresses all log messages for this span. The span itself is still created and exported; only the associated log record is omitted.
+    </ParamField>
+
+    <ParamField path="attributes" type="object">
+      Key-value pairs attached to the span as OpenTelemetry attributes. Values must be strings, booleans, or numbers.
+    </ParamField>
+  </Tab>
+
+  <Tab title="start_span() context manager">
+    Use `start_span()` when you want to trace a specific block of code within a function rather than the entire function call.
+
+    ```python
+    import patronus
+    from patronus.tracing import start_span
+
+    patronus.init()
+
+    def complex_workflow(data):
+        # First phase
+        with start_span("Data preparation", attributes={"data_size": len(data)}):
+            prepared_data = preprocess(data)
+
+        # Second phase
+        with start_span("Model inference"):
+            results = run_model(prepared_data)
+
+        # Third phase
+        with start_span("Post-processing"):
+            final_results = postprocess(results)
+
+        return final_results
+    ```
+
+    You can also set attributes dynamically on the span object yielded by the context manager:
+
+    ```python
+    with start_span(
+        "Span name",
+        record_exception=False,
+        attributes={"custom": "attribute"}
+    ) as span:
+        result = do_work()
+        span.set_attribute("dynamic_value", 42)
+    ```
+
+    <Note>
+      If `patronus.init()` has not been called, `start_span()` yields `None` and the wrapped code runs without creating a span.
+    </Note>
+
+    ### Parameters
+
+    <ParamField path="name" type="string" required>
+      Name of the span.
+    </ParamField>
+
+    <ParamField path="record_exception" type="boolean" default="True">
+      Whether to record exceptions that occur within the span.
+    </ParamField>
+
+    <ParamField path="attributes" type="object">
+      Key-value pairs attached to the span as OpenTelemetry attributes.
+    </ParamField>
+  </Tab>
+</Tabs>
+
+## Custom attributes
+
+Both tracing methods accept an `attributes` dict for attaching metadata to a span:
+
+```python
+@traced(attributes={
+    "model": "gpt-4",
+    "version": "1.0",
+    "temperature": 0.7
+})
+def generate_with_gpt4(prompt):
+    pass
+
+with start_span("Query processing", attributes={
+    "query_type": "search",
+    "filters_applied": True,
+    "result_limit": 10
+}):
+    pass
+```
+
+## Distributed tracing
+
+The Patronus SDK is built on OpenTelemetry and automatically propagates trace context across service boundaries. Install instrumentors from [opentelemetry-python-contrib](https://github.com/open-telemetry/opentelemetry-python-contrib) to enable automatic propagation for your framework or HTTP client.
+
+### FastAPI example with context propagation
+
+Install the required packages:
+
+```bash
+uv add opentelemetry-instrumentation-httpx \
+    opentelemetry-instrumentation-fastapi \
+    fastapi[all] \
+    patronus
+```
+
+**Backend service (`service_backend.py`):**
+
+```python
+import patronus
+from fastapi import FastAPI
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+# Initialize Patronus SDK
+patronus_context = patronus.init(service="backend")
+
+app = FastAPI(title="Backend Service")
+
+@app.get("/hello/{name}")
+async def hello_backend(name: str):
+    return {
+        "message": f"Hello {name} from Backend Service!",
+        "service": "backend"
+    }
+
+# Instrument FastAPI after Patronus initialization
+FastAPIInstrumentor.instrument_app(app, tracer_provider=patronus_context.tracer_provider)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)
+```
+
+**Gateway service (`service_gateway.py`):**
+
+```python
+import httpx
+import patronus
+from fastapi import FastAPI
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+# Initialize Patronus SDK with HTTPX instrumentation
+patronus_context = patronus.init(
+    service="gateway",
+    integrations=[
+        HTTPXClientInstrumentor(),
+    ]
+)
+
+app = FastAPI(title="Gateway Service")
+
+@app.get("/hello/{name}")
+async def hello_gateway(name: str):
+    # This HTTP call automatically propagates trace context
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"http://localhost:8001/hello/{name}")
+        backend_data = response.json()
+
+    return {
+        "gateway_message": f"Gateway received request for {name}",
+        "backend_response": backend_data
+    }
+
+# Instrument FastAPI after Patronus initialization
+FastAPIInstrumentor.instrument_app(app, tracer_provider=patronus_context.tracer_provider)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+**Running the example:**
+
+```bash
+export PATRONUS_API_KEY="your-api-key"
+```
+
+Then start both services and send a request:
+
+1. Start the backend: `python service_backend.py`
+2. Start the gateway: `python service_gateway.py`
+3. Make a request: `curl http://localhost:8000/hello/world`
+
+After the request completes, you can see the connected traces in the Patronus Platform showing the complete request flow from gateway to backend.
+
+<Warning>
+  Always call `FastAPIInstrumentor.instrument_app()` **after** `patronus.init()`, and pass the `tracer_provider` from the returned context object. Instrumenting before initialization will result in traces that are not exported to Patronus.
+</Warning>

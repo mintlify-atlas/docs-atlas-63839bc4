@@ -1,0 +1,96 @@
+---
+title: "Integrations"
+description: "Connect third-party libraries and OpenTelemetry instrumentors with the Patronus SDK."
+---
+
+Integrations add automatic tracing for third-party libraries (LLM frameworks, HTTP clients, etc.) by connecting them to the Patronus OpenTelemetry pipeline.
+
+## Passing integrations
+
+Pass integrations to `init()` or `run_experiment()` via the `integrations` parameter:
+
+```python
+import patronus
+from opentelemetry.instrumentation.openai import OpenAIInstrumentor
+
+patronus.init(
+    integrations=[OpenAIInstrumentor()],
+)
+```
+
+```python
+from patronus.experiments import run_experiment
+from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
+
+run_experiment(
+    dataset=...,
+    task=my_task,
+    evaluators=[...],
+    integrations=[AnthropicInstrumentor()],
+)
+```
+
+Each integration in the list is applied once when the Patronus context is built.
+
+## Supported integration types
+
+Two kinds of objects are accepted in the `integrations` list:
+
+### OpenTelemetry instrumentors
+
+Any object that inherits from `opentelemetry.instrumentation.instrumentor.BaseInstrumentor`. These are automatically wrapped in an `OpenTelemetryIntegrator` internally.
+
+```python
+from opentelemetry.instrumentation.openai import OpenAIInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
+patronus.init(
+    integrations=[
+        OpenAIInstrumentor(),
+        HTTPXClientInstrumentor(),
+    ]
+)
+```
+
+### `BasePatronusIntegrator`
+
+Custom integrations that implement the `BasePatronusIntegrator` interface.
+
+```python
+from patronus.integrations import BasePatronusIntegrator
+```
+
+## `BasePatronusIntegrator`
+
+Abstract base class for custom Patronus integrations.
+
+```python
+class BasePatronusIntegrator(abc.ABC):
+    @abc.abstractmethod
+    def apply(self, ctx: PatronusContext, **kwargs) -> None: ...
+```
+
+<ParamField path="ctx" type="PatronusContext" required>
+  The Patronus context being initialized. Use this to access the tracer provider, API clients, or scope.
+</ParamField>
+
+Implement `apply()` to configure your integration against the Patronus context.
+
+### Example
+
+```python
+from patronus.integrations import BasePatronusIntegrator
+from patronus.context import PatronusContext
+
+class MyCustomIntegrator(BasePatronusIntegrator):
+    def apply(self, ctx: PatronusContext, **kwargs) -> None:
+        tracer = ctx.tracer_provider.get_tracer("my-library")
+        # Configure your library to use the tracer
+        my_library.set_tracer(tracer)
+
+patronus.init(integrations=[MyCustomIntegrator()])
+```
+
+<Note>
+  If an unrecognized object is passed in the `integrations` list, the SDK raises a `ValueError` at initialization time.
+</Note>

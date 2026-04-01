@@ -1,0 +1,115 @@
+---
+title: "Introduction to experiments"
+description: "Run structured evaluations over datasets using tasks, evaluators, and results pipelines."
+---
+
+The Patronus experimentation framework gives you a systematic way to evaluate, compare, and improve LLM applications. Instead of running ad-hoc checks, you define a dataset, an optional task function, and one or more evaluators — then `run_experiment()` orchestrates everything, collects results, and surfaces a summary.
+
+## What experiments are
+
+An experiment follows a fixed pipeline for each row in your dataset:
+
+1. **Dataset** — a collection of examples, each represented as a `Row` object
+2. **Task** _(optional)_ — a Python function that processes each row and produces an output string
+3. **Evaluators** — one or more evaluators that score the task output
+4. **Results** — structured `EvaluationResult` objects collected into an `Experiment` you can export
+
+## Key concepts
+
+### Dataset
+
+A dataset is a collection of `Row` objects. Each `Row` exposes standard fields — `task_input`, `gold_answer`, `task_context`, `system_prompt`, `task_output`, `task_metadata`, `tags`, and `sid` — as well as any custom fields you add. Datasets can be defined inline, loaded from CSV or JSONL files, created from a pandas DataFrame, or fetched from the Patronus platform with `RemoteDatasetLoader`.
+
+### Row
+
+`Row` wraps a pandas `Series` and provides attribute access to all dataset fields. You access fields directly — `row.task_input`, `row.gold_answer` — without indexing into a dictionary.
+
+### Task
+
+A task is a plain Python function (sync or async) that receives a `Row` and returns either a string or a `TaskResult`. Tasks are optional: if your dataset already contains `task_output` values, you can skip the task step entirely and pass the pre-existing outputs straight to the evaluators.
+
+### Evaluators
+
+Evaluators assess task outputs and produce `EvaluationResult` objects containing scores, pass/fail flags, explanations, and metadata. Patronus supports three kinds:
+
+- **`RemoteEvaluator`** — managed evaluators running on Patronus infrastructure
+- **`StructuredEvaluator` / `AsyncStructuredEvaluator`** — class-based custom evaluators with a fixed parameter interface; used directly in experiments
+- **`FuncEvaluatorAdapter`** — wraps a function decorated with `@evaluator()` for use in experiments
+
+### Chains
+
+For multi-stage workflows, you can define a `chain` — a list of `{task, evaluators}` stages where the output of one stage becomes the input for the next. Each stage can access the previous stage's task output and evaluation results through the `parent` parameter.
+
+## Why use the experimentation framework
+
+| Ad-hoc evaluation | Experiments |
+|---|---|
+| One-off script per test | Reusable, versioned pipeline |
+| Manual result collection | Automatic aggregation and export |
+| Hard to reproduce | Same config → same results |
+| No concurrency | Configurable parallel execution |
+| Separate from tracing | Built-in OpenTelemetry tracing |
+
+## End-to-end example
+
+```python
+from patronus.evals import RemoteEvaluator
+from patronus.experiments import run_experiment
+
+def my_task(row, **kwargs):
+    return f"The answer is: {row.task_input}"
+
+experiment = run_experiment(
+    dataset=[
+        {"task_input": "What is 2+2?", "gold_answer": "4"},
+        {"task_input": "Who wrote Hamlet?", "gold_answer": "Shakespeare"},
+    ],
+    task=my_task,
+    evaluators=[
+        RemoteEvaluator("judge", "patronus:fuzzy-match"),
+    ],
+)
+
+experiment.to_csv("./results.csv")
+```
+
+Run it from the command line:
+
+```bash
+python experiment.py
+```
+
+The framework prints a summary after the experiment completes:
+
+```text
+==================================
+Experiment  Global/root-1742834029: 100%|██████████| 2/2 [00:04<00:00,  2.44s/sample]
+
+patronus:fuzzy-match (judge) [link_idx=0]
+-----------------------------------------
+Count     : 2
+Pass rate : 0
+Mean      : 0.0
+...
+```
+
+<Tip>
+  You can also `await run_experiment(...)` inside an async context, such as a Jupyter notebook. The function detects the running event loop automatically.
+</Tip>
+
+## Explore the other pages
+
+<CardGroup cols={2}>
+  <Card title="Datasets" icon="table" href="/experiments/datasets">
+    Load datasets from inline lists, CSV, JSONL, DataFrames, or the Patronus platform.
+  </Card>
+  <Card title="Tasks" icon="bolt" href="/experiments/tasks">
+    Write sync and async task functions that process each dataset row.
+  </Card>
+  <Card title="Running experiments" icon="play" href="/experiments/running">
+    Configure `run_experiment()`, use evaluator adapters, and export results.
+  </Card>
+  <Card title="Advanced experiments" icon="sliders" href="/experiments/advanced">
+    Multi-stage chains, concurrency controls, OpenTelemetry integrations, and more.
+  </Card>
+</CardGroup>

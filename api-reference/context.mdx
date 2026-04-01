@@ -1,0 +1,104 @@
+---
+title: "Context"
+description: "Access the Patronus SDK context and retrieve a configured Python logger."
+---
+
+## `get_logger()`
+
+Returns a standard Python `logging.Logger` configured to emit log records through the Patronus OpenTelemetry pipeline.
+
+```python
+from patronus import get_logger
+```
+
+### Signature
+
+```python
+def get_logger(
+    ctx: PatronusContext | None = None,
+    level: int = logging.INFO,
+) -> logging.Logger: ...
+```
+
+<ParamField path="ctx" type="PatronusContext | None" default="None">
+  Patronus context to use. When `None`, the current global context is used. Raises `UninitializedError` if no context is active.
+</ParamField>
+
+<ParamField path="level" type="int" default="logging.INFO">
+  Logging level to set on the returned logger.
+</ParamField>
+
+### Return value
+
+<ResponseField name="logger" type="logging.Logger">
+  A standard Python `logging.Logger` named `"patronus.sdk"` with a handler that forwards records to the OpenTelemetry logger provider. Log records are exported to the Patronus platform.
+</ResponseField>
+
+### Example
+
+```python
+import patronus
+
+patronus.init()
+
+logger = patronus.get_logger()
+logger.info("Starting evaluation pipeline")
+logger.warning("Unexpected output: %s", output)
+```
+
+<Note>
+  Call `patronus.init()` before calling `get_logger()`. The function raises `UninitializedError` if no context is active.
+</Note>
+
+---
+
+## `PatronusContext`
+
+The context object returned by `patronus.init()`. You rarely need to interact with it directly, but it is available if you need low-level access.
+
+```python
+from patronus.context import PatronusContext
+```
+
+### Fields
+
+<ResponseField name="scope" type="PatronusScope">
+  Contains `service`, `project_name`, `app`, `experiment_id`, and `experiment_name`.
+</ResponseField>
+
+<ResponseField name="tracer_provider" type="TracerProvider">
+  OpenTelemetry tracer provider.
+</ResponseField>
+
+<ResponseField name="logger_provider" type="LoggerProvider">
+  OpenTelemetry logger provider.
+</ResponseField>
+
+<ResponseField name="api_client" type="patronus_api.Client">
+  Synchronous Patronus API client.
+</ResponseField>
+
+<ResponseField name="async_api_client" type="patronus_api.AsyncClient">
+  Asynchronous Patronus API client.
+</ResponseField>
+
+<ResponseField name="exporter" type="BatchEvaluationExporter">
+  Exporter responsible for batching and uploading evaluation results.
+</ResponseField>
+
+<ResponseField name="prompts" type="PromptsConfig">
+  Prompt configuration: `directory`, `providers`, and `templating_engine`.
+</ResponseField>
+
+### Context accessor functions
+
+The following helpers are available in `patronus.context`:
+
+| Function | Description |
+|---|---|
+| `get_current_context()` | Returns the active `PatronusContext`. Raises `UninitializedError` if not initialized. |
+| `get_current_context_or_none()` | Returns the active `PatronusContext` or `None`. |
+| `get_tracer()` | Returns an OpenTelemetry `Tracer`. |
+| `get_api_client()` | Returns the synchronous `patronus_api.Client`. |
+| `get_async_api_client()` | Returns the asynchronous `patronus_api.AsyncClient`. |
+| `get_scope()` | Returns the `PatronusScope` for the current context. |

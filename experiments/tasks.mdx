@@ -1,0 +1,250 @@
+---
+title: "Tasks"
+description: "Write sync and async task functions that process dataset rows and produce outputs for evaluation."
+---
+
+A task is a Python function that the experiment framework calls once for each row in your dataset. The function receives the row and any experiment context, processes the input — typically by calling an LLM — and returns an output for the evaluators to assess.
+
+Tasks are optional. If your dataset already contains `task_output` values, you can omit the task entirely and pass those pre-existing outputs straight to the evaluators.
+
+## Task function signature
+
+Every task function must accept `row` as a keyword argument and should accept `**kwargs` to be forward-compatible:
+
+```python
+def my_task(row, **kwargs):
+    return f"The output is: {row.task_input}"
+```
+
+The framework passes these parameters to every task function:
+
+<ParamField path="row" type="Row">
+  The dataset example to process. Access standard fields as attributes — `row.task_input`, `row.gold_answer`, `row.system_prompt`, etc.
+</ParamField>
+
+<ParamField path="parent" type="EvalParent | None">
+  In multi-stage chains, `parent` holds the task output and evaluation results from the previous stage. `None` for the first (or only) stage.
+</ParamField>
+
+<ParamField path="tags" type="dict[str, str]">
+  Merged tags from the experiment and the dataset row. Read-only from the task's perspective.
+</ParamField>
+
+<ParamField path="**kwargs" type="any">
+  Additional keyword arguments. Always include `**kwargs` to avoid `TypeError` if new parameters are added in a future SDK version.
+</ParamField>
+
+## Return types
+
+### String
+
+Return a plain string when you only need to capture the text output:
+
+```python
+from patronus.datasets import Row
+
+def classify_sentiment(row: Row, **kwargs) -> str:
+    text = row.task_input
+    positive_words = ["good", "great", "excellent", "happy", "positive"]
+    negative_words = ["bad", "terrible", "awful", "sad", "negative"]
+
+    text_lower = text.lower()
+    positive_count = sum(word in text_lower for word in positive_words)
+    negative_count = sum(word in text_lower for word in negative_words)
+
+    if positive_count > negative_count:
+        return "positive"
+    elif negative_count > positive_count:
+        return "negative"
+    return "neutral"
+```
+
+The framework automatically wraps a string return value in a `TaskResult`.
+
+### `TaskResult`
+
+Return a `TaskResult` when you want to attach metadata, tags, or retrieval context alongside the output:
+
+```python
+from patronus.datasets import Row
+from patronus.experiments.types import TaskResult
+
+def task_with_metadata(row: Row, **kwargs) -> TaskResult:
+    output = f"Processed: {row.task_input}"
+
+    return TaskResult(
+        output=output,
+        metadata={
+            "processing_time_ms": 42,
+            "confidence": 0.95,
+            "tokens_used": 150,
+        },
+        tags={
+            "model": "gpt-4",
+            "temperature": "0.7",
+        },
+        context="Relevant retrieved passage used during generation.",
+    )
+```
+
+<ResponseField name="output" type="str | None">
+  The generated text that evaluators will score.
+</ResponseField>
+
+<ResponseField name="metadata" type="dict | None">
+  Arbitrary key-value data attached to the result — useful for tracking model parameters, latency, token usage, etc.
+</ResponseField>
+
+<ResponseField name="tags" type="dict[str, str] | None">
+  Tags added by the task. Merged with experiment-level tags when results are recorded. Experiment-level tags take precedence.
+</ResponseField>
+
+<ResponseField name="context" type="str | list[str] | None">
+  Retrieval context produced by the task. Passed to evaluators as `task_context`.
+</ResponseField>
+
+### `None`
+
+Return `None` to skip a row entirely. The framework will not call the evaluators for that row.
+
+```python
+def selective_task(row: Row, **kwargs):
+    if not row.task_input or not row.gold_answer:
+        return None  # skip rows with missing required fields
+    return f"Processed: {row.task_input}"
+```
+
+## Calling an LLM
+
+The most common task pattern is to send each row's input to an LLM and return the response:
+
+```python
+from openai import OpenAI
+from patronus.datasets import Row
+from patronus.experiments.types import TaskResult
+
+oai = OpenAI()
+
+def openai_task(row: Row, **kwargs) -> TaskResult:
+    system_message = row.system_prompt or "You are a helpful assistant."
+    messages = [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": row.task_input},
+    ]
+
+    response = oai.chat.completions.create(
+        model="gpt-4",
+        messages=messages,
+        temperature=0.7,
+        max_tokens=150,
+    )
+
+    output = response.choices[0].message.content
+
+    return TaskResult(
+        output=output,
+        metadata={
+            "model": response.model,
+            "tokens": {
+                "prompt": response.usage.prompt_tokens,
+                "completion": response.usage.completion_tokens,
+                "total": response.usage.total_tokens,
+            },
+        },
+    )
+```
+
+## Async tasks
+
+For better performance with I/O-bound work such as API calls, define your task as an `async def` function. The framework handles both sync and async tasks automatically.
+
+```python
+from openai import AsyncOpenAI
+from patronus.datasets import Row
+from patronus.experiments.types import TaskResult
+
+oai = AsyncOpenAI()
+
+async def async_openai_task(row: Row, **kwargs) -> TaskResult:
+    system_message = row.system_prompt or "You are a helpful assistant."
+    messages = [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": row.task_input},
+    ]
+
+    response = await oai.chat.completions.create(
+        model="gpt-4",
+        messages=messages,
+        temperature=0.7,
+        max_tokens=150,
+    )
+
+    output = response.choices[0].message.content
+    return TaskResult(output=output, metadata={"model": response.model})
+```
+
+<Tip>
+  Prefer async tasks when your task makes network calls. The experiment framework processes rows concurrently, so async tasks can significantly reduce total run time.
+</Tip>
+
+## Accessing previous chain results
+
+In multi-stage chains, tasks in later stages receive a `parent` parameter containing the previous stage's output and evaluations:
+
+```python
+from patronus.datasets import Row
+from patronus.experiments.types import EvalParent
+
+def second_stage_task(row: Row, parent: EvalParent, **kwargs) -> str:
+    if parent and parent.task:
+        previous_output = parent.task.output
+
+        # Optionally use previous evaluation results to guide this stage
+        if parent.evals:
+            coherence = parent.evals.get("judge:coherence")
+            if coherence and coherence.score and coherence.score > 0.8:
+                return f"Detailed follow-up on: {previous_output}"
+
+        return f"Building on previous output: {previous_output}"
+
+    return f"Starting fresh: {row.task_input}"
+```
+
+## Error handling
+
+If an unhandled exception escapes your task function, the framework logs the error and skips that row. Handle exceptions explicitly when you want finer control:
+
+```python
+from patronus import get_logger
+from patronus.datasets import Row
+
+def robust_task(row: Row, **kwargs):
+    try:
+        if not row.task_input:
+            return None  # skip rows with no input
+        return f"Processed: {row.task_input}"
+    except Exception as e:
+        get_logger().exception(f"Error processing row {row.sid}: {e}")
+        return None  # skip this row
+```
+
+## Tasks are optional
+
+If your dataset already contains `task_output` values, omit the `task` parameter entirely. The evaluators receive the pre-existing `task_output` directly from the row:
+
+```python
+from patronus.evals import RemoteEvaluator
+from patronus.experiments import run_experiment
+
+experiment = run_experiment(
+    dataset=[
+        {
+            "task_input": "What is the capital of France?",
+            "task_output": "The capital of France is Paris.",  # pre-existing output
+            "gold_answer": "Paris",
+        },
+    ],
+    # No task= argument — evaluators score task_output from the dataset
+    evaluators=[RemoteEvaluator("judge", "patronus:fuzzy-match")],
+)
+```

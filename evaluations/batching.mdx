@@ -1,0 +1,239 @@
+---
+title: "Batching evaluations"
+description: "Run multiple evaluators in parallel using the Patronus client for efficient, aggregated results."
+---
+
+When you need to apply several evaluators to the same output, running them one at a time is slow. The `Patronus` client lets you submit a list of evaluators and executes them in parallel, returning a single `EvaluationContainer` with all results.
+
+## Setup
+
+<Steps>
+  <Step title="Install and initialize">
+    Install the SDK and set your API key, then call `patronus.init()` before creating any clients.
+
+    ```bash
+    pip install patronus
+    export PATRONUS_API_KEY="your-api-key"
+    ```
+  </Step>
+  <Step title="Create a Patronus client">
+    Use `Patronus` as a context manager. The client manages connection pooling and ensures all background export tasks complete when the block exits.
+
+    ```python
+    import patronus
+    from patronus.pat_client import Patronus
+
+    patronus.init()
+
+    with Patronus() as client:
+        ...
+    ```
+  </Step>
+  <Step title="Run multiple evaluators">
+    Pass a list of evaluators to `client.evaluate()`. All evaluators run in parallel against the same input data.
+
+    ```python
+    from patronus.evals import RemoteEvaluator
+
+    with Patronus() as client:
+        results = client.evaluate(
+            evaluators=[
+                RemoteEvaluator("judge", "patronus:is-helpful"),
+                RemoteEvaluator("lynx", "patronus:hallucination"),
+            ],
+            task_input="What is quantum computing?",
+            task_output="Quantum computing uses qubits to perform computations...",
+            gold_answer="Computing that uses quantum phenomena like superposition and entanglement",
+        )
+
+        if results.all_succeeded():
+            print("All evaluations passed!")
+        else:
+            for failed in results.failed_evaluations():
+                print(f"Failed: {failed.text_output}")
+    ```
+  </Step>
+</Steps>
+
+## Working with `EvaluationContainer`
+
+`client.evaluate()` returns an `EvaluationContainer` that aggregates results from all evaluators.
+
+```python
+results = client.evaluate(evaluators=[...], task_input="...", task_output="...")
+
+# Check overall outcome
+if results.all_succeeded():
+    print("All evaluations passed")
+
+if results.any_failed():
+    print("At least one evaluation failed")
+
+# Iterate over individual results
+for result in results.failed_evaluations():
+    print(f"Failed check: {result.text_output}")
+    print(f"Explanation: {result.explanation}")
+
+for result in results.succeeded_evaluations():
+    print(f"Passed: {result.text_output}")
+
+# Handle exceptions
+if results.has_exception():
+    results.raise_on_exception()  # Re-raises the first exception that occurred
+```
+
+## Async batching
+
+Use `AsyncPatronus` and `AsyncRemoteEvaluator` in async contexts.
+
+```python
+import asyncio
+import patronus
+from patronus.pat_client import AsyncPatronus
+from patronus.evals import AsyncRemoteEvaluator
+
+patronus.init()
+
+async def evaluate_responses():
+    async with AsyncPatronus() as client:
+        results = await client.evaluate(
+            evaluators=[
+                AsyncRemoteEvaluator("judge", "patronus:is-helpful"),
+                AsyncRemoteEvaluator("lynx", "patronus:hallucination"),
+            ],
+            task_input="What is quantum computing?",
+            task_output="Quantum computing uses qubits to perform computations...",
+            gold_answer="Computing that uses quantum phenomena like superposition and entanglement",
+        )
+
+        print(f"Number of evaluations: {len(results.results)}")
+        print(f"All passed: {results.all_succeeded()}")
+
+asyncio.run(evaluate_responses())
+```
+
+## Background evaluation
+
+Use `evaluate_bg()` to start an evaluation without blocking the calling thread. This is useful when you want to continue processing while the evaluation runs.
+
+<CodeGroup>
+
+```python sync.py
+import patronus
+from patronus.pat_client import Patronus
+from patronus.evals import RemoteEvaluator
+
+patronus.init()
+
+with Patronus() as client:
+    # Start evaluation in the background
+    future = client.evaluate_bg(
+        evaluators=[
+            RemoteEvaluator("judge", "factual-accuracy"),
+            RemoteEvaluator("judge", "patronus:helpfulness"),
+        ],
+        task_input="Explain how vaccines work.",
+        task_output="Vaccines train the immune system to recognize pathogens...",
+    )
+
+    # Continue doing other work
+    print("Evaluation running in background...")
+
+    # Block until results are ready
+    results = future.get()
+    print(f"Evaluation complete: {results.all_succeeded()}")
+```
+
+```python async.py
+import asyncio
+import patronus
+from patronus.pat_client import AsyncPatronus
+from patronus.evals import AsyncRemoteEvaluator
+
+patronus.init()
+
+async def main():
+    async with AsyncPatronus() as client:
+        task = client.evaluate_bg(
+            evaluators=[
+                AsyncRemoteEvaluator("judge", "factual-accuracy"),
+            ],
+            task_input="...",
+            task_output="...",
+        )
+
+        # Do other async work concurrently
+        await some_other_async_function()
+
+        # Await results when ready
+        results = await task
+        print(f"Passed: {results.all_succeeded()}")
+```
+
+</CodeGroup>
+
+## Grouping custom evaluators with `bundled_eval()`
+
+When you use multiple `@evaluator()`-decorated functions and want to group them under a single trace and log record, use the `bundled_eval()` context manager.
+
+```python
+import patronus
+from patronus.evals import bundled_eval, evaluator
+
+patronus.init()
+
+@evaluator()
+def exact_match(actual: str, expected: str) -> bool:
+    return actual == expected
+
+@evaluator()
+def iexact_match(actual: str, expected: str) -> bool:
+    return actual.strip().lower() == expected.strip().lower()
+
+# Both evaluations share a single trace span and log record
+with bundled_eval():
+    exact_match("Paris", "Paris")
+    iexact_match("paris ", "Paris")
+```
+
+<Tip>
+  `bundled_eval()` groups evaluations by the arguments passed to each evaluator. If two evaluators receive the same arguments, they are automatically de-duplicated in the log.
+</Tip>
+
+## Comprehensive quality check example
+
+```python
+import patronus
+from patronus.pat_client import Patronus
+from patronus.evals import RemoteEvaluator
+
+patronus.init()
+
+def check_content_quality(question: str, answer: str) -> bool:
+    with Patronus() as client:
+        results = client.evaluate(
+            evaluators=[
+                RemoteEvaluator("judge", "factual-accuracy"),
+                RemoteEvaluator("judge", "helpfulness"),
+                RemoteEvaluator("judge", "coherence"),
+                RemoteEvaluator("judge", "grammar"),
+                RemoteEvaluator("lynx", "patronus:hallucination"),
+            ],
+            task_input=question,
+            task_output=answer,
+        )
+
+        if results.any_failed():
+            print("Content quality check failed:")
+            for failed in results.failed_evaluations():
+                print(f"  - {failed.text_output}: {failed.explanation}")
+            return False
+
+        print("Content passed all quality checks.")
+        return True
+
+check_content_quality(
+    "What is the capital of France?",
+    "The capital of France is Paris, which is located on the Seine River.",
+)
+```

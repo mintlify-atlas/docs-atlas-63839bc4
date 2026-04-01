@@ -1,0 +1,450 @@
+---
+title: "Prompt management"
+description: "Version, retrieve, and render prompts in your LLM applications using the Patronus SDK."
+keywords: ["prompts", "prompt management", "versioning", "load_prompt", "push_prompt", "mustache", "jinja2", "template engine"]
+---
+
+The Patronus SDK lets you store prompts on the Patronus Platform, load them by name or label, and render them with your choice of template engine. This keeps prompt content out of your codebase and makes it easy to iterate without redeploying.
+
+## Quick start
+
+### Create and push a prompt
+
+```python
+import patronus
+import textwrap
+from patronus.prompts import Prompt, push_prompt
+
+patronus.init()
+
+prompt = Prompt(
+    name="support/troubleshooting/login-issues",
+    body=textwrap.dedent("""
+        You are a support specialist for {product_name}.
+        ISSUE: {issue_description}
+        TIER: {subscription_tier}
+
+        Provide a solution for this {issue_type} problem. Be concise.
+        Include steps and end with an offer for further help.
+        """),
+    description="Support prompt for login issues",
+    metadata={"temperature": 0.7, "tone": "helpful"}
+)
+
+loaded_prompt = push_prompt(prompt)
+```
+
+### Load and render a prompt
+
+```python
+import patronus
+from patronus.prompts import load_prompt
+
+patronus.init()
+
+prompt = load_prompt(name="support/troubleshooting/login-issues")
+
+rendered = prompt.render(
+    issue_description="Password reset link not working",
+    product_name="CloudWorks",
+    subscription_tier="Enterprise",
+    issue_type="password reset"
+)
+print(rendered)
+```
+
+---
+
+## The `Prompt` object
+
+Use `Prompt` to define a new prompt before pushing it to the platform.
+
+```python
+from patronus.prompts import Prompt
+
+prompt = Prompt(
+    name="dev/bug-fix/python-error",
+    body="Fix this Python code error: {error_message}. Code: ```python\n{code_snippet}\n```",
+    description="Template for Python debugging assistance",
+    metadata={
+        "creator": "dev-team",
+        "temperature": 0.7,
+        "max_tokens": 250
+    }
+)
+```
+
+<ParamField path="name" type="string" required>
+  Hierarchical name for the prompt, such as `support/chat/system`. See [Naming conventions](#naming-conventions) for guidance.
+</ParamField>
+
+<ParamField path="body" type="string" required>
+  The prompt text. Include template variables using the syntax for your chosen engine (`{var}` for f-string, `{{var}}` for mustache, `{{ var }}` for jinja2).
+</ParamField>
+
+<ParamField path="description" type="string">
+  Human-readable description. Applied when creating a new prompt definition; ignored when adding a revision to an existing prompt.
+</ParamField>
+
+<ParamField path="metadata" type="object">
+  Arbitrary key-value pairs stored with the revision. Useful for tracking model parameters, authorship, or tags.
+</ParamField>
+
+---
+
+## `push_prompt()` and `apush_prompt()`
+
+Push a `Prompt` to the platform. If a revision with the same body and metadata already exists, the existing revision is returned instead of creating a duplicate.
+
+<Tabs>
+  <Tab title="Sync">
+    ```python
+    from patronus.prompts import Prompt, push_prompt
+
+    prompt = Prompt(
+        name="research/data-analysis/summarize-findings",
+        body="Analyze the {data_type} data and summarize the key {metric_type} trends in {time_period}.",
+        metadata={
+            "models": ["gpt-4", "claude-3"],
+            "created_by": "data-team",
+            "tags": ["data", "analysis"]
+        }
+    )
+
+    loaded_prompt = push_prompt(prompt)
+    print(loaded_prompt.revision)
+    ```
+  </Tab>
+  <Tab title="Async">
+    ```python
+    from patronus.prompts import Prompt, apush_prompt
+
+    prompt = Prompt(
+        name="research/data-analysis/summarize-findings",
+        body="Analyze the {data_type} data and summarize the key {metric_type} trends in {time_period}.",
+        metadata={
+            "models": ["gpt-4", "claude-3"],
+            "created_by": "data-team",
+            "tags": ["data", "analysis"]
+        }
+    )
+
+    loaded_prompt = await apush_prompt(prompt)
+    print(loaded_prompt.revision)
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  `push_prompt` detects duplicates by hashing the normalized prompt body. If only the metadata differs, a new revision is created. If both body and metadata match, the existing revision is returned unchanged.
+</Note>
+
+### Parameters
+
+<ParamField path="prompt" type="Prompt" required>
+  The `Prompt` object to push.
+</ParamField>
+
+<ParamField path="project" type="string">
+  Project name override. Defaults to the project name set in `patronus.init()` or the `PATRONUS_PROJECT_NAME` environment variable.
+</ParamField>
+
+<ParamField path="engine" type="string">
+  Template engine for the returned `LoadedPrompt`. Does not affect how the prompt is stored. Defaults to the engine set in config (`f-string` by default).
+</ParamField>
+
+---
+
+## `load_prompt()` and `aload_prompt()`
+
+Retrieve a prompt from the platform by name. Returns the latest revision unless you specify `revision` or `label`.
+
+<Tabs>
+  <Tab title="Sync">
+    ```python
+    import patronus
+    from patronus.prompts import load_prompt
+
+    patronus.init()
+
+    # Load the latest revision
+    prompt = load_prompt(name="content/writing/blog-instructions")
+
+    # Load a specific revision
+    prompt = load_prompt(name="content/blog/technical-explainer", revision=3)
+
+    # Load by label
+    prompt = load_prompt(name="legal/contracts/privacy-policy", label="production")
+    ```
+  </Tab>
+  <Tab title="Async">
+    ```python
+    from patronus.prompts import aload_prompt
+
+    # Load the latest revision
+    prompt = await aload_prompt(name="content/writing/blog-instructions")
+
+    # Load a specific revision
+    prompt = await aload_prompt(name="content/blog/technical-explainer", revision=3)
+
+    # Load by label
+    prompt = await aload_prompt(name="legal/contracts/privacy-policy", label="production")
+    ```
+  </Tab>
+</Tabs>
+
+### Parameters
+
+<ParamField path="name" type="string" required>
+  The prompt name to retrieve.
+</ParamField>
+
+<ParamField path="revision" type="integer">
+  Specific revision number to load. If omitted, the latest revision is returned.
+</ParamField>
+
+<ParamField path="label" type="string">
+  Load the revision that has this label attached. For example, `"production"` or `"staging"`.
+</ParamField>
+
+<ParamField path="project" type="string">
+  Project name override. Defaults to the configured project name.
+</ParamField>
+
+<ParamField path="disable_cache" type="boolean" default="False">
+  When `True`, bypasses the in-process cache for both reading and writing. Useful in long-running processes where you want to pick up prompt changes without restarting.
+</ParamField>
+
+<ParamField path="engine" type="string">
+  Template engine to use when rendering the loaded prompt. Accepts `"f-string"`, `"mustache"`, or `"jinja2"`. Defaults to the engine set in config.
+</ParamField>
+
+---
+
+## Rendering prompts
+
+Call `.render(**kwargs)` on a loaded prompt to substitute template variables.
+
+```python
+rendered = prompt.render(
+    user_query="How do I optimize database performance?",
+    expertise_level="intermediate"
+)
+```
+
+### Template engines
+
+Patronus supports three template engines. The default is `f-string`.
+
+<Tabs>
+  <Tab title="f-string (default)">
+    Uses Python f-string syntax. Variables are wrapped in single curly braces.
+
+    ```python
+    # prompt body: "Hello {name}, your tier is {tier}."
+    rendered = prompt.with_engine("f-string").render(name="Alex", tier="pro")
+    ```
+  </Tab>
+  <Tab title="Mustache">
+    Uses Mustache syntax. Variables are wrapped in double curly braces.
+
+    ```python
+    # prompt body: "Hello {{name}}, your tier is {{tier}}."
+    rendered = prompt.with_engine("mustache").render(name="Alex", tier="pro")
+    ```
+  </Tab>
+  <Tab title="Jinja2">
+    Uses Jinja2 syntax. Supports conditionals, loops, and filters in addition to variable substitution.
+
+    ```python
+    # prompt body: "Hello {{ name }}, your tier is {{ tier }}."
+    rendered = prompt.with_engine("jinja2").render(name="Alex", tier="pro")
+    ```
+  </Tab>
+</Tabs>
+
+You can also set the default engine globally at initialization:
+
+```python
+import patronus
+
+patronus.init(
+    prompt_templating_engine="mustache"
+)
+```
+
+---
+
+## Working with labels
+
+Labels give you a stable, human-readable reference to a specific revision. Use them to track which revision is deployed to each environment.
+
+```python
+from patronus import context
+
+client = context.get_api_client().prompts
+
+# Point the "production" label at revision 5
+client.add_label(
+    prompt_id="prompt_123",
+    revision=5,
+    label="production"
+)
+
+# Point a label at a different revision (label moves, old revision is unchanged)
+client.add_label(
+    prompt_id="prompt_123",
+    revision=7,
+    label="production"
+)
+```
+
+Load a labeled revision in your application:
+
+```python
+prompt = load_prompt(name="legal/contracts/privacy-policy", label="production")
+```
+
+<Tip>
+  Labels like `"production"` and `"staging"` let you promote a prompt to production by updating the label rather than changing application code.
+</Tip>
+
+---
+
+## Working with metadata
+
+Metadata is a free-form dictionary stored with each revision. Use it to track model recommendations, authorship, tags, or any other structured information.
+
+```python
+from patronus.prompts import Prompt, push_prompt, load_prompt
+
+prompt = Prompt(
+    name="research/data-analysis/summarize-findings",
+    body="Analyze the {data_type} data and summarize the key {metric_type} trends in {time_period}.",
+    metadata={
+        "models": ["gpt-4", "claude-3"],
+        "created_by": "data-team",
+        "tags": ["data", "analysis"]
+    }
+)
+
+push_prompt(prompt)
+
+# Read metadata back after loading
+loaded = load_prompt(name="research/data-analysis/summarize-findings")
+supported_models = loaded.metadata.get("models", [])
+creator = loaded.metadata.get("created_by", "unknown")
+
+print(f"Supported models: {', '.join(supported_models)}")
+print(f"Created by: {creator}")
+```
+
+---
+
+## Using multiple prompts together
+
+Complex applications often compose several prompts — a system prompt, a user message template, and a response format — loaded separately and rendered with different variables.
+
+```python
+import patronus
+from patronus.prompts import load_prompt
+import openai
+
+patronus.init()
+
+system_prompt = load_prompt(name="support/chat/system")
+user_query_template = load_prompt(name="support/chat/user-message")
+
+client = openai.OpenAI()
+
+response = client.chat.completions.create(
+    model="gpt-4",
+    messages=[
+        {
+            "role": "system",
+            "content": system_prompt.render(
+                product_name="CloudWorks Pro",
+                available_features=["file sharing", "collaboration", "automation"],
+                knowledge_cutoff="2024-05-01"
+            )
+        },
+        {
+            "role": "user",
+            "content": user_query_template.render(
+                user_name="Alex",
+                user_tier="premium",
+                user_query="How do I share files with external users?"
+            )
+        }
+    ],
+    temperature=0.7,
+    max_tokens=500
+)
+```
+
+The same approach works with any LLM provider. Here is an Anthropic example:
+
+```python
+import patronus
+from patronus.prompts import load_prompt
+import anthropic
+
+patronus.init()
+
+system_prompt = load_prompt(name="support/knowledge-base/technical-assistance")
+client = anthropic.Anthropic()
+
+response = client.messages.create(
+    model="claude-3-opus-20240229",
+    system=system_prompt.render(
+        product_name="CloudWorks Pro",
+        user_tier="enterprise",
+        available_features=["advanced monitoring", "auto-scaling", "SSO integration"]
+    ),
+    messages=[
+        {"role": "user", "content": "How do I configure the load balancer for high availability?"}
+    ]
+)
+```
+
+---
+
+## Naming conventions
+
+Use a hierarchical, path-style naming structure to keep prompts organized:
+
+```
+[domain]/[use-case]/[component]/[prompt-type]
+```
+
+The optional `[prompt-type]` suffix indicates the prompt's role in an LLM conversation:
+
+| Type | Purpose |
+|---|---|
+| `system` | Sets overall behavior, persona, or context for the model |
+| `instruction` | Provides specific task instructions |
+| `user` | Template for a user message |
+| `assistant` | Template for an assistant response |
+| `few-shot` | Contains input/output examples |
+
+**Examples:**
+
+```
+support/troubleshooting/diagnostic-questions/system
+marketing/email-campaigns/follow-up-template/instruction
+dev/code-generation/python-function/instruction
+content/blog-post/technical-tutorial/few-shot
+```
+
+Use a shared prefix for prompts that work together in the same feature:
+
+```
+# Onboarding chat prompts
+onboarding/chat/welcome/system
+onboarding/chat/questions/user
+onboarding/chat/intro/assistant
+
+# Support classifier prompts
+support/classifier/system
+support/classifier/categories/instruction
+```

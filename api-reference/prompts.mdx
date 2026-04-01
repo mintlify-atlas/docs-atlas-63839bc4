@@ -1,0 +1,241 @@
+---
+title: "Prompts"
+description: "Load, push, and render versioned prompts from the Patronus platform or local storage."
+---
+
+The prompts module manages versioned prompt templates. Prompts can be fetched from the Patronus API or local files, and rendered with variables using configurable template engines.
+
+## `Prompt`
+
+A local prompt definition used when pushing a new revision.
+
+```python
+from patronus.prompts.models import Prompt
+```
+
+### Fields
+
+<ResponseField name="name" type="str" required>
+  Name of the prompt definition.
+</ResponseField>
+
+<ResponseField name="body" type="str" required>
+  Template body of the prompt.
+</ResponseField>
+
+<ResponseField name="description" type="str | None" default="None">
+  Optional description for the prompt definition. Only used when creating a new definition.
+</ResponseField>
+
+<ResponseField name="metadata" type="dict | None" default="None">
+  Arbitrary JSON-serializable metadata to associate with this revision.
+</ResponseField>
+
+### `render()`
+
+Render the prompt template with variables.
+
+```python
+prompt.render(**kwargs) -> str
+```
+
+If no kwargs are provided, the raw body is returned. Uses the configured templating engine (`f-string`, `mustache`, or `jinja2`).
+
+```python
+p = Prompt(name="greeting", body="Hello, {name}!")
+text = p.render(name="Alice")  # "Hello, Alice!"
+```
+
+### `with_engine()`
+
+Return a new prompt instance with a specific template engine set.
+
+```python
+prompt.with_engine(engine) -> Prompt
+```
+
+<ParamField path="engine" type='"f-string" | "mustache" | "jinja2" | TemplateEngine' required>
+  Template engine to use when rendering.
+</ParamField>
+
+---
+
+## `load_prompt()`
+
+Retrieve a prompt synchronously. Alias for `PromptClient.get()`.
+
+```python
+from patronus.prompts.clients import load_prompt
+```
+
+### Signature
+
+```python
+load_prompt(
+    name,
+    revision=None,
+    label=None,
+    project=NOT_GIVEN,
+    disable_cache=False,
+    provider=NOT_GIVEN,
+    engine=NOT_GIVEN,
+) -> LoadedPrompt
+```
+
+<ParamField path="name" type="str" required>
+  Name of the prompt to retrieve.
+</ParamField>
+
+<ParamField path="revision" type="int | None" default="None">
+  Specific revision number to retrieve. When not specified, the latest revision is returned.
+</ParamField>
+
+<ParamField path="label" type="str | None" default="None">
+  Filter by label. Returns only prompts with this label.
+</ParamField>
+
+<ParamField path="project" type="str" default="(from config)">
+  Project name override. Defaults to the project name from the current context or config.
+</ParamField>
+
+<ParamField path="disable_cache" type="bool" default="False">
+  When `True`, bypasses the in-memory cache for both reading and writing.
+</ParamField>
+
+<ParamField path="provider" type='str | list | PromptProvider' default="(from config)">
+  Provider(s) to use. Accepts `"local"`, `"api"`, a `PromptProvider` instance, or a list of these. Defaults to the `prompt_providers` setting in config.
+</ParamField>
+
+<ParamField path="engine" type='"f-string" | "mustache" | "jinja2"' default="(from config)">
+  Template engine for rendering the prompt. Defaults to `prompt_templating_engine` in config.
+</ParamField>
+
+**Returns:** `LoadedPrompt`
+
+**Raises:** `PromptNotFoundError` if the prompt cannot be found.
+
+---
+
+## `aload_prompt()`
+
+Async version of `load_prompt()`. Same parameters, same return type.
+
+```python
+from patronus.prompts.clients import aload_prompt
+
+prompt = await aload_prompt("my-prompt", revision=3)
+```
+
+---
+
+## `push_prompt()`
+
+Push a prompt to the Patronus API, creating a new revision only if the body or metadata has changed. Synchronous.
+
+```python
+from patronus.prompts.clients import push_prompt
+```
+
+### Signature
+
+```python
+push_prompt(
+    prompt,
+    project=NOT_GIVEN,
+    engine=NOT_GIVEN,
+) -> LoadedPrompt
+```
+
+<ParamField path="prompt" type="Prompt" required>
+  The prompt to push. If a revision with an identical normalized body and metadata already exists, the existing revision is returned instead of creating a new one.
+</ParamField>
+
+<ParamField path="project" type="str" default="(from config)">
+  Project name override.
+</ParamField>
+
+<ParamField path="engine" type='"f-string" | "mustache" | "jinja2"' default="(from config)">
+  Template engine set on the returned `LoadedPrompt`. This does not affect how the prompt is stored.
+</ParamField>
+
+**Returns:** `LoadedPrompt` — the created or existing revision.
+
+<Note>
+  When creating a new revision for an existing prompt definition, the `description` field is not updated even if it differs from the existing one.
+</Note>
+
+---
+
+## `apush_prompt()`
+
+Async version of `push_prompt()`. Same parameters, same return type.
+
+```python
+from patronus.prompts.clients import apush_prompt
+
+loaded = await apush_prompt(Prompt(name="my-prompt", body="Hello {name}!"))
+```
+
+---
+
+## `LoadedPrompt`
+
+Returned by `load_prompt()` and `push_prompt()`. Extends `Prompt` with server-side fields.
+
+### Additional fields
+
+<ResponseField name="prompt_definition_id" type="str">
+  ID of the prompt definition.
+</ResponseField>
+
+<ResponseField name="project_id" type="str">
+  ID of the project this prompt belongs to.
+</ResponseField>
+
+<ResponseField name="project_name" type="str">
+  Name of the project.
+</ResponseField>
+
+<ResponseField name="revision_id" type="str">
+  ID of this specific revision.
+</ResponseField>
+
+<ResponseField name="revision" type="int">
+  Revision number.
+</ResponseField>
+
+<ResponseField name="normalized_body_sha256" type="str">
+  SHA-256 hash of the normalized (trimmed) prompt body. Used for deduplication.
+</ResponseField>
+
+<ResponseField name="labels" type="list[str]">
+  Labels attached to this revision.
+</ResponseField>
+
+<ResponseField name="created_at" type="datetime">
+  Timestamp when this revision was created.
+</ResponseField>
+
+---
+
+## Example
+
+```python
+import patronus
+from patronus.prompts.clients import load_prompt, push_prompt
+from patronus.prompts.models import Prompt
+
+patronus.init()
+
+# Push a prompt (creates revision only if body changed)
+push_prompt(Prompt(
+    name="summarizer",
+    body="Summarize the following text in {max_words} words:\n\n{text}",
+    description="Summarization prompt",
+))
+
+# Load and render
+prompt = load_prompt("summarizer")
+rendered = prompt.render(max_words=50, text="The quick brown fox...")
+print(rendered)
+```

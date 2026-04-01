@@ -1,0 +1,96 @@
+---
+title: "LLM integrations"
+description: "Instrument LLM API calls from Anthropic, OpenAI, and other providers using OpenTelemetry-based instrumentors."
+keywords: ["llm", "openai", "anthropic", "openinference", "opentelemetry", "instrumentation", "observability"]
+---
+
+The Patronus SDK accepts any OpenTelemetry-based LLM instrumentor through the `integrations` parameter of `patronus.init()`. Once registered, the instrumentor automatically captures telemetry from every LLM API call and sends it to the Patronus Platform.
+
+A popular choice for LLM instrumentation is [OpenInference](https://github.com/Arize-ai/openinference), which provides ready-made instrumentors for Anthropic, OpenAI, and other providers.
+
+---
+
+## Anthropic
+
+<CodeGroup>
+  ```bash pip
+  pip install openinference-instrumentation-anthropic
+  ```
+  ```bash uv
+  uv add openinference-instrumentation-anthropic
+  ```
+</CodeGroup>
+
+```python
+from patronus import init
+from openinference.instrumentation.anthropic import AnthropicInstrumentor
+
+patronus_ctx = init(
+    integrations=[AnthropicInstrumentor()]
+)
+
+# All Anthropic API calls are now automatically instrumented
+```
+
+After initialization, every call to `anthropic.Anthropic()` or `anthropic.AsyncAnthropic()` is traced and the telemetry is forwarded to Patronus.
+
+---
+
+## OpenAI
+
+<CodeGroup>
+  ```bash pip
+  pip install openinference-instrumentation-openai
+  ```
+  ```bash uv
+  uv add openinference-instrumentation-openai
+  ```
+</CodeGroup>
+
+```python
+from patronus import init
+from openinference.instrumentation.openai import OpenAIInstrumentor
+
+patronus_ctx = init(
+    integrations=[OpenAIInstrumentor()]
+)
+
+# All OpenAI API calls are now automatically instrumented
+```
+
+---
+
+## Multiple providers
+
+Pass a list to `integrations` to instrument several providers at once:
+
+```python
+from patronus import init
+from openinference.instrumentation.anthropic import AnthropicInstrumentor
+from openinference.instrumentation.openai import OpenAIInstrumentor
+
+patronus_ctx = init(
+    project_name="my-multi-llm-project",
+    app="llm-application",
+    integrations=[
+        AnthropicInstrumentor(),
+        OpenAIInstrumentor(),
+    ]
+)
+
+# Both Anthropic and OpenAI API calls are now instrumented
+```
+
+<Tip>
+  You can combine LLM instrumentors with other OpenTelemetry instrumentors (such as `HTTPXClientInstrumentor` or `FastAPIInstrumentor`) in the same list. See [Tracing](/observability/tracing) for framework instrumentation examples.
+</Tip>
+
+---
+
+## How it works
+
+When you pass an instrumentor to `patronus.init()`, the SDK calls the instrumentor's `instrument()` method with its own `TracerProvider`. This ensures all LLM spans are exported to the Patronus OTLP endpoint rather than a default exporter.
+
+<Note>
+  Always pass instrumentors through `patronus.init()` rather than calling `instrumentor.instrument()` directly. Calling `instrument()` before initialization will use a default tracer provider and traces will not appear in the Patronus Platform.
+</Note>

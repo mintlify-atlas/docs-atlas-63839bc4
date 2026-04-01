@@ -1,0 +1,267 @@
+---
+title: "Experiments"
+description: "Run structured evaluation pipelines over datasets using tasks and evaluators."
+---
+
+## `run_experiment()`
+
+Creates and runs an experiment to completion. Context-aware:
+
+- **Synchronous context** — blocks until the experiment finishes and returns an `Experiment`.
+- **Async context** (e.g. Jupyter) — returns an awaitable that must be awaited.
+
+```python
+from patronus.experiments import run_experiment
+```
+
+### Signature
+
+```python
+run_experiment(
+    dataset,
+    task=None,
+    evaluators=None,
+    chain=None,
+    tags=None,
+    max_concurrency=10,
+    project_name=None,
+    experiment_name=None,
+    service=None,
+    api_key=None,
+    api_url=None,
+    otel_endpoint=None,
+    otel_exporter_otlp_protocol=None,
+    ui_url=None,
+    timeout_s=None,
+    integrations=None,
+    verify_ssl=True,
+    **kwargs,
+) -> Experiment | Awaitable[Experiment]
+```
+
+<ParamField path="dataset" type="Dataset | DatasetLoader | list[dict] | tuple[dict] | pd.DataFrame | Awaitable | Callable" required>
+  The dataset to run evaluations against. Accepts `Dataset`, `DatasetLoader`, a list/tuple of dicts, a pandas `DataFrame`, or an awaitable/callable that resolves to a `Dataset`.
+</ParamField>
+
+<ParamField path="task" type="Callable | None" default="None">
+  Function that processes each dataset row and returns a `TaskResult`, `str`, or `None` (to skip the row). Mutually exclusive with `chain`.
+
+  Signature: `def task(*, row: Row, parent: EvalParent, tags: dict) -> TaskResult | str | None`
+</ParamField>
+
+<ParamField path="evaluators" type="list[StructuredEvaluator | AsyncStructuredEvaluator | BaseEvaluatorAdapter] | None" default="None">
+  Evaluators to run against each row's task output. Mutually exclusive with `chain`.
+</ParamField>
+
+<ParamField path="chain" type="list[ChainLink] | None" default="None">
+  Multi-stage evaluation pipeline. Each `ChainLink` is a `TypedDict` with `task` and `evaluators` keys. Mutually exclusive with `task` and `evaluators`.
+</ParamField>
+
+<ParamField path="tags" type="dict[str, str] | None" default="None">
+  Key-value tags applied to all evaluations in the experiment.
+</ParamField>
+
+<ParamField path="max_concurrency" type="int" default="10">
+  Maximum number of concurrent task and evaluation operations.
+</ParamField>
+
+<ParamField path="project_name" type="str | None" default="None">
+  Project name. Falls back to config or environment variables.
+</ParamField>
+
+<ParamField path="experiment_name" type="str | None" default="None">
+  Custom name for this experiment run. A timestamp is appended automatically.
+</ParamField>
+
+<ParamField path="api_key" type="str | None" default="None">
+  API key. Falls back to config or `PATRONUS_API_KEY`.
+</ParamField>
+
+<ParamField path="api_url" type="str | None" default="None">
+  Patronus API URL. Falls back to config or `PATRONUS_API_URL`.
+</ParamField>
+
+<ParamField path="integrations" type="list | None" default="None">
+  Integrations to enable for this experiment. See [Integrations](/api-reference/integrations).
+</ParamField>
+
+**Returns:** `Experiment` (sync) or `Awaitable[Experiment]` (async).
+
+### Example
+
+```python
+from patronus.experiments import run_experiment
+from patronus.evals import RemoteEvaluator
+from patronus.experiments.types import TaskResult
+
+def my_task(*, row, parent, tags):
+    output = call_my_llm(row.task_input)
+    return TaskResult(output=output)
+
+experiment = run_experiment(
+    dataset=[
+        {"task_input": "What is 2+2?", "gold_answer": "4"},
+    ],
+    task=my_task,
+    evaluators=[RemoteEvaluator("lynx", "patronus:hallucination")],
+    project_name="my-project",
+)
+```
+
+---
+
+## `Experiment`
+
+Manages an evaluation experiment over a dataset. Create via `Experiment.create()` or the `run_experiment()` convenience function.
+
+```python
+from patronus.experiments import Experiment
+```
+
+### `Experiment.create()` (class method)
+
+Async factory that prepares the experiment (creates the project/experiment record, loads remote evaluators, resolves the dataset).
+
+```python
+experiment = await Experiment.create(
+    dataset, task=None, evaluators=None, chain=None,
+    tags=None, metadata=None, max_concurrency=10,
+    project_name=None, experiment_name=None, ...
+)
+```
+
+Accepts the same parameters as `run_experiment()`, plus:
+
+<ParamField path="metadata" type="dict | None" default="None">
+  Arbitrary metadata associated with the experiment record.
+</ParamField>
+
+### `run()`
+
+Execute the experiment. Must be called after `create()`.
+
+```python
+await experiment.run() -> Experiment
+```
+
+Returns the experiment instance.
+
+### `to_dataframe()`
+
+Convert results to a pandas `DataFrame`.
+
+```python
+df = experiment.to_dataframe() -> pd.DataFrame
+```
+
+### `to_csv()`
+
+Save results to a CSV file.
+
+```python
+experiment.to_csv(path_or_buf, **kwargs) -> str | None
+```
+
+---
+
+## `TaskResult`
+
+Return value for experiment task functions.
+
+```python
+from patronus.experiments import TaskResult
+```
+
+### Fields
+
+<ResponseField name="output" type="str | None" default="None">
+  The model or task output to be evaluated.
+</ResponseField>
+
+<ResponseField name="metadata" type="dict | None" default="None">
+  Additional metadata about the task execution.
+</ResponseField>
+
+<ResponseField name="tags" type="dict[str, str] | None" default="None">
+  Tags to attach to evaluations for this row.
+</ResponseField>
+
+<ResponseField name="context" type="list[str] | str | None" default="None">
+  Retrieval context produced by the task, passed to structured evaluators.
+</ResponseField>
+
+---
+
+## `EvalParent`
+
+Type alias for `_EvalParent | None`. Passed to task functions and `EvaluatorAdapter.transform()` to give access to prior chain steps.
+
+```python
+from patronus.experiments import EvalParent
+```
+
+Use `parent.find_eval_result(evaluator_or_name)` to look up an earlier evaluation result by evaluator name or instance.
+
+---
+
+## `FuncEvaluatorAdapter`
+
+Adapter that connects a `@evaluator()`-decorated function to the experiment framework.
+
+```python
+from patronus.experiments import FuncEvaluatorAdapter
+```
+
+### Constructor
+
+```python
+FuncEvaluatorAdapter(fn, weight=None)
+```
+
+<ParamField path="fn" type="Callable" required>
+  An `@evaluator()`-decorated function. Raises `ValueError` if the function is not decorated.
+</ParamField>
+
+<ParamField path="weight" type="str | float | None" default="None">
+  Relative weight within the experiment. Must be a valid decimal number.
+</ParamField>
+
+Override `transform()` to control how row/task_result are mapped to evaluator arguments.
+
+### Example
+
+```python
+from patronus import evaluator
+from patronus.experiments import FuncEvaluatorAdapter, run_experiment
+
+@evaluator()
+def exact_match(row, **kwargs):
+    return row.task_output == row.gold_answer
+
+run_experiment(
+    dataset=[{"task_output": "Paris", "gold_answer": "Paris"}],
+    evaluators=[FuncEvaluatorAdapter(exact_match)],
+)
+```
+
+---
+
+## `StructuredEvaluatorAdapter`
+
+Wraps a `StructuredEvaluator` or `AsyncStructuredEvaluator` for use in experiments. Maps dataset row fields to evaluator parameters automatically.
+
+```python
+from patronus.experiments import StructuredEvaluatorAdapter
+```
+
+```python
+StructuredEvaluatorAdapter(evaluator)
+```
+
+<ParamField path="evaluator" type="StructuredEvaluator | AsyncStructuredEvaluator" required>
+  The structured evaluator to wrap.
+</ParamField>
+
+<Tip>
+  `StructuredEvaluator` instances passed directly to `evaluators` in `run_experiment()` are automatically wrapped in a `StructuredEvaluatorAdapter`.
+</Tip>

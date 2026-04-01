@@ -1,0 +1,133 @@
+---
+title: "Configuration"
+description: "Configure the Patronus SDK using function parameters, environment variables, or a YAML file."
+keywords: ["configuration", "api key", "environment variables", "patronus.yaml", "settings"]
+---
+
+The SDK reads configuration from three sources. When the same option is set in multiple places, this precedence order applies:
+
+1. **Function parameters** (highest priority)
+2. **Environment variables**
+3. **`patronus.yaml` file**
+4. **Default values** (lowest priority)
+
+## Configuration options
+
+| Option | Environment variable | Default |
+|---|---|---|
+| `api_key` | `PATRONUS_API_KEY` | — |
+| `project_name` | `PATRONUS_PROJECT_NAME` | `Global` |
+| `app` | `PATRONUS_APP` | `default` |
+| `service` | `PATRONUS_SERVICE` | `OTEL_SERVICE_NAME` env var, then `platform.node()` |
+| `api_url` | `PATRONUS_API_URL` | `https://api.patronus.ai` |
+| `ui_url` | `PATRONUS_UI_URL` | `https://app.patronus.ai` |
+| `otel_endpoint` | `PATRONUS_OTEL_ENDPOINT` | `https://otel.patronus.ai:4317` |
+| `otel_exporter_otlp_protocol` | `PATRONUS_OTEL_EXPORTER_OTLP_PROTOCOL` | Falls back to OTEL env vars, defaults to `grpc` |
+| `timeout_s` | `PATRONUS_TIMEOUT_S` | `300` |
+| `prompt_templating_engine` | `PATRONUS_PROMPT_TEMPLATING_ENGINE` | `f-string` |
+| `prompt_providers` | `PATRONUS_PROMPT_PROVIDERS` | `["local", "api"]` |
+| `resource_dir` | `PATRONUS_RESOURCE_DIR` | `./patronus` |
+
+<Warning>
+  If you set `api_url` to a non-default value, you must also set `otel_endpoint` to point to the same environment. Setting only `api_url` will raise a `ValueError`.
+</Warning>
+
+## Configuration methods
+
+<Tabs>
+  <Tab title="Function parameters">
+    Pass options directly to `patronus.init()` or `run_experiment()`. These values take the highest priority and override everything else.
+
+    **With `init()`** — use this for tracing and evaluations outside of experiments:
+
+    ```python
+    import patronus
+
+    patronus.init(
+        project_name="my-project",
+        app="recommendation-service",
+        api_key="your-api-key",
+        service="my-service",
+        prompt_templating_engine="mustache",
+    )
+    ```
+
+    **With `run_experiment()`** — experiments handle their own initialization, so you do not need to call `init()` separately:
+
+    ```python
+    from patronus.experiments import run_experiment
+
+    result = run_experiment(
+        dataset=my_dataset,
+        task=my_task,
+        evaluators=[my_evaluator],
+        project_name="my-project",
+        api_key="your-api-key",
+        service="my-service",
+    )
+    ```
+  </Tab>
+
+  <Tab title="Environment variables">
+    Set environment variables with the `PATRONUS_` prefix before running your script:
+
+    ```bash
+    export PATRONUS_API_KEY="your-api-key"
+    export PATRONUS_PROJECT_NAME="my-project"
+    export PATRONUS_APP="recommendation-service"
+    export PATRONUS_SERVICE="my-service"
+    export PATRONUS_TIMEOUT_S="60"
+    ```
+
+    With these set, you can call `patronus.init()` with no arguments:
+
+    ```python
+    import patronus
+
+    patronus.init()
+    ```
+  </Tab>
+
+  <Tab title="patronus.yaml">
+    Create a `patronus.yaml` file in your working directory. The SDK loads it automatically when `patronus.init()` is called.
+
+    ```yaml
+    api_key: "your-api-key"
+    project_name: "my-project"
+    app: "my-agent"
+    service: "my-service"
+
+    api_url: "https://api.patronus.ai"
+    ui_url: "https://app.patronus.ai"
+    otel_endpoint: "https://otel.patronus.ai:4317"
+    otel_exporter_otlp_protocol: "grpc"  # or "http/protobuf"
+    timeout_s: 300
+
+    prompt_templating_engine: "mustache"
+    prompt_providers: ["local", "api"]
+    resource_dir: "./my-resources"
+    ```
+
+    <Tip>
+      The YAML file is a convenient way to share a baseline configuration across a team without repeating options in every script.
+    </Tip>
+  </Tab>
+</Tabs>
+
+## Accessing configuration programmatically
+
+For advanced use cases, you can read the resolved configuration through the `Config` singleton:
+
+```python
+from patronus.config import config
+
+cfg = config()
+
+print(cfg.api_key)
+print(cfg.project_name)
+
+if cfg.api_url != "https://api.patronus.ai":
+    print("Using a custom API endpoint")
+```
+
+`config()` returns the same singleton on every call, so configuration is resolved only once per process.

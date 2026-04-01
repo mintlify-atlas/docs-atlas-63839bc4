@@ -1,0 +1,176 @@
+---
+title: "Remote evaluators"
+description: "Use Patronus-managed evaluators that run on Patronus infrastructure."
+---
+
+Remote evaluators are evaluators that run on Patronus infrastructure. You supply the input data and receive an `EvaluationResult` — the evaluation logic itself is managed on the Patronus platform. This lets you use sophisticated evaluators like hallucination detection and helpfulness scoring without writing any evaluation code.
+
+## Basic usage
+
+```python
+import patronus
+from patronus.evals import RemoteEvaluator
+
+patronus.init()
+
+factual_accuracy = RemoteEvaluator("judge", "factual-accuracy")
+
+result = factual_accuracy.evaluate(
+    task_input="What is the capital of France?",
+    task_output="The capital of France is Paris, which is located on the Seine River.",
+    gold_answer="Paris",
+)
+
+print(f"Passed: {result.pass_}")
+print(f"Score: {result.score}")
+print(f"Explanation: {result.explanation}")
+```
+
+The first argument to `RemoteEvaluator` is the evaluator name (for example, `"judge"` or `"lynx"`). The second is the criteria name, which tells the evaluator what to assess. If you omit the criteria, the evaluator's default criteria is used.
+
+<Note>
+  Browse available evaluator names and criteria in the [Patronus platform console](https://app.patronus.ai). Criteria names follow the format `"name"` or `"patronus:name"` for built-in criteria.
+</Note>
+
+## The `evaluate()` method
+
+<ParamField path="task_input" type="str | None">
+  The input that was sent to the LLM. For example, the user's question or prompt.
+</ParamField>
+
+<ParamField path="task_output" type="str | None">
+  The output produced by the LLM. This is the primary value being evaluated.
+</ParamField>
+
+<ParamField path="task_context" type="list[str] | str | None">
+  Retrieved context provided to the LLM, such as documents from a RAG pipeline. Pass a list of strings for multiple context chunks.
+</ParamField>
+
+<ParamField path="gold_answer" type="str | None">
+  The expected or reference answer. Used by evaluators that compare output against a known-correct response.
+</ParamField>
+
+<ParamField path="system_prompt" type="str | None">
+  The system prompt sent to the LLM, if applicable.
+</ParamField>
+
+<ParamField path="task_metadata" type="dict | None">
+  Arbitrary metadata to attach to this evaluation request.
+</ParamField>
+
+```python
+result = evaluator.evaluate(
+    task_input="Explain how vaccines work.",
+    task_output="Vaccines train the immune system to recognize pathogens...",
+    task_context=[
+        "Vaccines introduce antigens that stimulate an immune response.",
+        "The immune system then creates memory cells for future protection.",
+    ],
+    gold_answer="Vaccines expose the immune system to a weakened or inactive pathogen.",
+    system_prompt="You are a helpful medical assistant.",
+)
+```
+
+## Synchronous and asynchronous versions
+
+`RemoteEvaluator` is synchronous. Use `AsyncRemoteEvaluator` in async contexts.
+
+<CodeGroup>
+
+```python sync.py
+from patronus.evals import RemoteEvaluator
+
+evaluator = RemoteEvaluator("judge", "patronus:is-helpful")
+
+result = evaluator.evaluate(
+    task_input="How do I reset my password?",
+    task_output="Click Forgot password on the login page.",
+)
+print(f"Helpful: {result.pass_}")
+```
+
+```python async.py
+import asyncio
+from patronus.evals import AsyncRemoteEvaluator
+
+async def main():
+    evaluator = AsyncRemoteEvaluator("judge", "patronus:is-helpful")
+
+    result = await evaluator.evaluate(
+        task_input="How do I reset my password?",
+        task_output="Click Forgot password on the login page.",
+    )
+    print(f"Helpful: {result.pass_}")
+
+asyncio.run(main())
+```
+
+</CodeGroup>
+
+## Retry configuration
+
+Remote evaluators automatically retry on transient failures using exponential backoff. You can tune this behavior when constructing the evaluator.
+
+```python
+from patronus.evals import RemoteEvaluator
+
+evaluator = RemoteEvaluator(
+    "judge",
+    "factual-accuracy",
+    retry_max_attempts=5,     # Maximum number of attempts (default: 3)
+    retry_initial_delay=2,    # Seconds before the first retry (default: 1)
+    retry_backoff_factor=3,   # Multiplier applied to each subsequent delay (default: 2)
+)
+```
+
+<ParamField path="retry_max_attempts" type="int" default="3">
+  Maximum number of total attempts, including the initial request. Set to `1` to disable retries.
+</ParamField>
+
+<ParamField path="retry_initial_delay" type="int" default="1">
+  Seconds to wait before the first retry attempt.
+</ParamField>
+
+<ParamField path="retry_backoff_factor" type="int" default="2">
+  Multiplier applied to the delay between each subsequent retry. With `retry_initial_delay=1` and `retry_backoff_factor=2`, the delays are 1 s, 2 s, 4 s, and so on.
+</ParamField>
+
+**Example retry timeline** with defaults (`retry_max_attempts=3`, `retry_initial_delay=1`, `retry_backoff_factor=2`):
+
+| Attempt | Delay before attempt |
+|---|---|
+| 1st | None (immediate) |
+| 2nd | 1 second |
+| 3rd | 2 seconds |
+| 4th | 4 seconds |
+
+If all attempts fail, the original exception is raised.
+
+<Warning>
+  If you use `AsyncRemoteEvaluator`, all retry configuration parameters are identical — only the `evaluate()` call requires `await`.
+</Warning>
+
+## Hallucination detection example
+
+```python
+import patronus
+from patronus.evals import RemoteEvaluator
+
+patronus.init()
+
+hallucination_check = RemoteEvaluator("lynx", "patronus:hallucination")
+
+result = hallucination_check.evaluate(
+    task_input="What did the study conclude?",
+    task_output="The study concluded that the drug reduced symptoms by 40%.",
+    task_context=[
+        "The clinical trial showed a 40% reduction in symptom severity.",
+        "The trial enrolled 500 participants over 12 months.",
+    ],
+)
+
+if not result.pass_:
+    print(f"Hallucination detected: {result.explanation}")
+else:
+    print("Response is grounded in context.")
+```

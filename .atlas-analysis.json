@@ -1,23 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Patronus Python SDK",
+  "projectType": "sdk-library",
+  "projectName": "Patronus Python SDK",
+  "projectDescription": "A Python SDK for systematic evaluation, observability, and experimentation with Large Language Model (LLM) applications.",
   "theme": "luma",
-  "colors": {
-    "primary": "#94cb04",
-    "light": "#545454"
-  },
-  "favicon": "https://media.brand.dev/288cc7c4-5cef-4376-950b-bdf0083eedae.png",
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/patronus-ai/patronus-py"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/patronus-ai/patronus-py"
-    }
-  },
+  "primaryColor": "#94cb04",
+  "lightColor": "#545454",
+  "darkColor": null,
   "navigation": {
     "tabs": [
       {
@@ -100,5 +88,43 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "Custom and remote LLM evaluators with flexible return types",
+    "Structured experimentation framework for systematic LLM testing",
+    "OpenTelemetry-based distributed tracing with @traced decorator and start_span context manager",
+    "Prompt management with versioning, labels, and multiple template engines",
+    "Integrations with OpenAI, Anthropic, and other LLM providers via OpenInference",
+    "Async support throughout the SDK (AsyncRemoteEvaluator, AsyncStructuredEvaluator)",
+    "Configurable via code, environment variables, or YAML config file"
+  ],
+  "publicApiSurface": [
+    "patronus.init()",
+    "patronus.traced()",
+    "patronus.start_span()",
+    "patronus.evaluator()",
+    "patronus.RemoteEvaluator",
+    "patronus.Evaluator",
+    "patronus.StructuredEvaluator",
+    "patronus.AsyncStructuredEvaluator",
+    "patronus.EvaluationResult",
+    "patronus.Patronus",
+    "patronus.AsyncPatronus",
+    "patronus.evals.AsyncRemoteEvaluator",
+    "patronus.evals.bundled_eval()",
+    "patronus.experiments.run_experiment()",
+    "patronus.experiments.Experiment",
+    "patronus.experiments.Row",
+    "patronus.experiments.TaskResult",
+    "patronus.experiments.FuncEvaluatorAdapter",
+    "patronus.experiments.StructuredEvaluatorAdapter",
+    "patronus.experiments.RemoteDatasetLoader",
+    "patronus.experiments.Dataset",
+    "patronus.prompts.load_prompt()",
+    "patronus.prompts.push_prompt()",
+    "patronus.prompts.aload_prompt()",
+    "patronus.prompts.apush_prompt()",
+    "patronus.prompts.Prompt",
+    "patronus.get_logger()"
+  ]
 }

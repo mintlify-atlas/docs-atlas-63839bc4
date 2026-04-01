@@ -1,0 +1,189 @@
+---
+title: "Datasets"
+description: "Dataset, Row, and loader classes for supplying evaluation data to experiments."
+---
+
+## `Dataset`
+
+An in-memory dataset backed by a pandas `DataFrame`.
+
+```python
+from patronus.experiments import Dataset
+```
+
+### Fields
+
+<ResponseField name="dataset_id" type="str | None">
+  Optional identifier for the dataset.
+</ResponseField>
+
+<ResponseField name="df" type="pd.DataFrame">
+  Underlying pandas DataFrame.
+</ResponseField>
+
+### `Dataset.from_records()`
+
+Create a `Dataset` from a list or iterable of dicts.
+
+```python
+Dataset.from_records(records, dataset_id=None) -> Dataset
+```
+
+<ParamField path="records" type="Iterable[dict]" required>
+  Records to build the dataset from. Dict keys should match standard field names (e.g. `task_input`, `task_output`, `gold_answer`).
+</ParamField>
+
+<ParamField path="dataset_id" type="str | None" default="None">
+  Optional identifier to associate with the dataset.
+</ParamField>
+
+### `Dataset.from_dataframe()`
+
+Create a `Dataset` from an existing pandas `DataFrame`.
+
+```python
+Dataset.from_dataframe(df, dataset_id=None) -> Dataset
+```
+
+### `iterrows()`
+
+Iterate over rows as `Row` objects.
+
+```python
+for row in dataset.iterrows():
+    print(row.task_input)
+```
+
+### `to_csv()`
+
+Save the dataset to a CSV file.
+
+```python
+dataset.to_csv(path_or_buf, **kwargs) -> str | None
+```
+
+---
+
+## `Row`
+
+A single dataset row. Wraps a pandas `Series` and provides typed property access.
+
+```python
+from patronus.experiments import Row
+```
+
+### Properties
+
+<ResponseField name="sid" type="str">
+  Sample identifier. Auto-assigned as a sequential integer string if not provided.
+</ResponseField>
+
+<ResponseField name="dataset_id" type="str | None">
+  Dataset identifier, if set.
+</ResponseField>
+
+<ResponseField name="system_prompt" type="str | None">
+  System prompt associated with the sample.
+</ResponseField>
+
+<ResponseField name="task_context" type="list[str] | None">
+  Retrieved context for the task. String values are automatically wrapped in a list.
+</ResponseField>
+
+<ResponseField name="task_attachments" type="list | None">
+  Multimodal attachments for the task. Each attachment is a dict with `url` and `media_type` fields.
+</ResponseField>
+
+<ResponseField name="task_input" type="str | None">
+  User input sent to the model.
+</ResponseField>
+
+<ResponseField name="task_output" type="str | None">
+  Model response or pre-computed output.
+</ResponseField>
+
+<ResponseField name="gold_answer" type="str | None">
+  Expected correct answer.
+</ResponseField>
+
+<ResponseField name="task_metadata" type="dict | None">
+  Arbitrary metadata about the task.
+</ResponseField>
+
+<ResponseField name="tags" type="dict[str, str] | None">
+  Key-value tags for the sample.
+</ResponseField>
+
+You can access arbitrary columns via attribute access: `row.my_custom_column`.
+
+---
+
+## `RemoteDatasetLoader`
+
+Load a dataset from the Patronus platform by ID.
+
+```python
+from patronus.experiments import RemoteDatasetLoader
+```
+
+Pass a `RemoteDatasetLoader` as the `dataset` argument to `run_experiment()` or `Experiment.create()`. The dataset is fetched asynchronously when the experiment is prepared.
+
+---
+
+## Reading from files
+
+### `read_csv()`
+
+```python
+from patronus.datasets import read_csv
+
+dataset = read_csv("data.csv", dataset_id="my-dataset")
+```
+
+<ParamField path="filename_or_buffer" type="str | Path | IO" required>
+  Path or file-like object to read from.
+</ParamField>
+
+<ParamField path="dataset_id" type="str | None" default="None">
+  Optional dataset identifier.
+</ParamField>
+
+Additional parameters let you remap CSV column names to standard field names:
+
+| Parameter | Default |
+|---|---|
+| `sid_field` | `"sid"` |
+| `system_prompt_field` | `"system_prompt"` |
+| `task_input_field` | `"task_input"` |
+| `task_context_field` | `"task_context"` |
+| `task_output_field` | `"task_output"` |
+| `gold_answer_field` | `"gold_answer"` |
+| `task_metadata_field` | `"task_metadata"` |
+| `tags_field` | `"tags"` |
+
+Extra `**kwargs` are forwarded to `pandas.read_csv()`.
+
+### `read_jsonl()`
+
+Same interface as `read_csv()` but reads JSONL format. Extra `**kwargs` forwarded to `pandas.read_json()`.
+
+```python
+from patronus.datasets import read_jsonl
+
+dataset = read_jsonl("data.jsonl")
+```
+
+---
+
+## Example
+
+```python
+from patronus.experiments import run_experiment, Dataset
+
+dataset = Dataset.from_records([
+    {"task_input": "What is 2+2?", "gold_answer": "4"},
+    {"task_input": "What is the capital of France?", "gold_answer": "Paris"},
+])
+
+run_experiment(dataset=dataset, ...)
+```
